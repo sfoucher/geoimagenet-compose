@@ -199,34 +199,73 @@ SERVICES="postgis postgis_backups migrations api geoserver geoserver-datastore m
 
 ## Users and roles
 
-Manage accounts in Magpie's administration interface, `https://${HOST_FQDN}/magpie/`: log in as the admin, then go to **Users**. Each user belongs to one role group:
+Accounts, groups and permissions live in Magpie. The administrator account is `MAGPIE_ADMIN_USER` / `MAGPIE_ADMIN_PW` from `env.local`; there is no self-registration, so the administrator creates every account.
 
-| Group | Can do |
+### Roles
+
+Each person gets **one role group** (all accounts are also in `anonymous` automatically):
+
+| Group | Can do in the platform |
 |---|---|
 | `annotators` | draw, edit, release and delete their own annotations; see the imagery |
-| `validators` | validate or reject released annotations; see the imagery |
+| `validators` | validate or reject the released annotations of the users they follow; see the imagery |
 | `full` | both of the above |
-| `administrators` | everything |
-| `anonymous` | (no login) read the public annotations and taxonomy; no imagery |
+| `administrators` | everything, including Magpie administration |
+| `observers` | read-only access to the API and GeoServer (for scripts or GIS clients); the web interface doesn't show them the imagery, since they lack the frontend `wms` permission |
+| `anonymous` | (no login) the public annotations and taxonomy; no imagery |
 
-The same can be scripted with Magpie's API:
+### With the administration interface
+
+Open `https://${HOST_FQDN}/magpie/` and log in as the administrator.
+
+- **Create an account:** **Users** → **Add User**. Fill in the user name, email, password and group, then **Add User**. Give the person their user name and password through a private channel.
+- **Change a password, email or role:** **Users** → **Edit** on the person's row. Change the password or email, and check or uncheck groups under the group memberships.
+- **Remove someone's access:** uncheck their role group (they keep an account but can only do what `anonymous` can), or **Delete** the account.
+
+Deleting an account doesn't delete its annotations; they stay in the database with the author's numeric ID. Removing the role group is usually enough.
+
+### With the API (scripts, many accounts)
+
+The same operations through Magpie's REST API, verified on 2026-11-24:
 
 ```bash
 set -a; . ./env.local; set +a
-curl -sk -c /tmp/mc -X POST https://localhost/magpie/signin -H 'Content-Type: application/json' \
+M=https://${HOST_FQDN}/magpie
+curl -sk -c /tmp/mc -X POST $M/signin -H 'Content-Type: application/json' \
   -d "{\"user_name\":\"$MAGPIE_ADMIN_USER\",\"password\":\"$MAGPIE_ADMIN_PW\"}"
-curl -sk -b /tmp/mc -X POST https://localhost/magpie/users -H 'Content-Type: application/json' \
-  -d '{"user_name":"jdoe","email":"jdoe@example.org","password":"<generated>","group_name":"annotators"}'
+
+PW=$(openssl rand -base64 12)                                   # give it to the person privately
+curl -sk -b /tmp/mc -X POST $M/users -H 'Content-Type: application/json' \
+  -d "{\"user_name\":\"jdoe\",\"email\":\"jdoe@example.org\",\"password\":\"$PW\",\"group_name\":\"annotators\"}"
+
+curl -sk -b /tmp/mc $M/users/jdoe                               # details, including the numeric user_id
+curl -sk -b /tmp/mc $M/users/jdoe/groups                        # groups
+curl -sk -b /tmp/mc -X POST $M/users/jdoe/groups -H 'Content-Type: application/json' \
+  -d '{"group_name":"validators"}'                              # add a role
+curl -sk -b /tmp/mc -X DELETE $M/users/jdoe/groups/annotators   # remove a role
+curl -sk -b /tmp/mc -X PUT $M/users/jdoe -H 'Content-Type: application/json' \
+  -d '{"password":"<new password>"}'                            # reset the password
+curl -sk -b /tmp/mc -X DELETE $M/users/jdoe                     # delete the account
+curl -sk -b /tmp/mc $M/users                                    # list all accounts
+
 rm /tmp/mc
 ```
 
-**The annotation workflow, and what users must know:**
+`POST /users` answers 201 when the account is created; the other calls answer 200 or 201.
+
+### Setting up a validator: following annotators
+
+**A validator only sees the annotations of the users they follow.** In Validate mode the interface shows "released annotations by me or by users I follow" and nothing else. A new validator follows nobody, so their validation list is empty ("there are no annotations on the current page"). Set this up once for each validator:
+
+1. Find each annotator's **numeric user ID**: on the map, an annotation from someone you don't follow is labelled `<class> : user <ID>` (for example `Cropland : user 3`). The administrator can also read it in Magpie (`GET /magpie/users/<name>`, field `user_id`).
+2. Log in to the platform as the validator, open the sidebar's **Settings** panel, and under **Followed users** enter the annotator's ID ("Other user's unique id") and a nickname of your choice. Add each annotator the same way.
+3. Reload the page. The followed annotators' released annotations now appear in Validate mode, labelled with the nickname.
+
+### The annotation workflow, and what users must know
 
 1. The annotator draws an annotation (status `new`), then **releases** it. A `new` annotation never reaches validators.
-2. **A validator only sees the annotations of the users they follow.** Each validator must add their annotators in the user settings ("followed users"). Without it, the validation list stays empty: "there are no annotations on the current page".
-3. The validator validates or rejects released annotations. **The "Validate/Reject current page's annotations" button rejects every annotation whose box is unchecked**, and clicking a row unchecks it. Rejection is final. To validate one annotation, click its polygon in Validate mode instead.
-
-Validated annotations are public: `GET https://${HOST_FQDN}/api/v1/batches/annotations` returns them as GeoJSON without login.
+2. The validator, following that annotator, validates or rejects it. **The "Validate/Reject current page's annotations" button rejects every annotation whose box is unchecked**, and clicking a row unchecks it. Rejection is final. To validate one annotation, click its polygon in Validate mode instead.
+3. Validated annotations are public: `GET https://${HOST_FQDN}/api/v1/batches/annotations` returns them as GeoJSON without login.
 
 ## Backups and restore
 
