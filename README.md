@@ -57,7 +57,7 @@ ERROR: for geoserver_setup  Cannot start service geoserver_setup: error while mo
 Make sure all docker bind volumes exist locally before running `up`. The following command will create all the directories for the default configuration:
 
 ```
-sudo mkdir -p /nas /data/ml/models /data/ml/jobs /data/ml/datasets /data/db_gis_data /data/mongodb_backups /data/mongodb_persist /data/geoserver/data_dir /data/postgis_backups
+sudo mkdir -p /nas /data/db_gis_data /data/geoserver/data_dir /data/postgis_backups
 ```
 
 When installing on a new server, the postgis database needs to be initialized.

@@ -22,11 +22,11 @@ PLATFORMS = {
             'releaseTime': '2019-06-30T00:00:00Z',
             'researchSubject': 'GEOGRAPHICAL INFORMATION',
             'supportEmail': '${SUPPORT_EMAIL}',
-            'tags': ['Cloud','High Resolution Satellite imagery','Annotation','Geographical taxonomy', 'Deep learning' ]
+            'tags': ['Cloud','High Resolution Satellite imagery','Annotation','Geographical taxonomy' ]
         },
         'stats': {
             'method': '.*',
-            'route': '(/platform|/dataset|/model|/benchmarks|/api/.*|/ml/.*|/magpie/.*|/twitcher/.*|/geoserver/.*)'
+            'route': '(/platform|/api/.*|/magpie/.*|/twitcher/.*|/geoserver/.*)'
         },
         'redirect': {
             'doc': 'https://${HOST_FQDN}/canarie/static/doc.html',
@@ -47,11 +47,6 @@ PLATFORMS = {
             'Annotation': {
                 'request': {
                     'url': 'http://api:8080/api'
-                }
-            },
-            'ML': {
-                'request': {
-                    'url': 'http://ml:3000' 
                 }
             },
             'Magpie': {

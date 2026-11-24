@@ -1,5 +1,6 @@
 version: "3"
 services:
+
   frontend:
     image: docker-registry.crim.ca/geoimagenet/frontend:1.8.3
     container_name: frontend
@@ -20,19 +21,6 @@ services:
       - FRONTEND_PYTHON_SENTRY_DSN=${FRONTEND_PYTHON_SENTRY_DSN}
     volumes:
       - dist:/code/dist
-
-  graphql:
-    image: docker-registry.crim.ca/geoimagenet/graphql:0.2.4
-    container_name: graphql
-    environment:
-      - ML_ENDPOINT=http://ml:3000
-      - MAGPIE_ENDPOINT=http://magpie:2001
-      # this raw model storage path is used as absolute path when posting models from graphql to ml
-      # it MUST stay the same between graphql and ml or the model creation will break
-      - RAW_MODEL_STORAGE_PATH=${RAW_MODEL_STORAGE_PATH}
-      - GEOIMAGENET_API_URL=https://${HOST_FQDN}/api/v1
-    volumes:
-      - ml_models:${RAW_MODEL_STORAGE_PATH}
 
   api:
     image: &annotation_api_image docker-registry.crim.ca/geoimagenet/api:1.4.2
@@ -98,32 +86,6 @@ services:
       - GEOIMAGENET_API_POSTGIS_PASSWORD=${POSTGIS_PASSWORD}
       - GEOIMAGENET_API_SENTRY_URL=${GEOIMAGENET_API_SENTRY_URL}
 
-  ml:
-    image: docker-registry.crim.ca/geoimagenet/ml:2.2.1
-    container_name: ml
-    volumes:
-      # models, datasets and jobs to be mounted to preserve them across image deployments
-      # NOTE:
-      #   if destination values are modified, they must also be updated in the 'ml.ini' config
-      #   in the docker image to reflect the changes in the settings, where values are retrieved
-      - ml_datasets:/data/geoimagenet/datasets
-      # this raw model storage path is used as absolute path when posting models from graphql to ml
-      # it MUST stay the same between graphql and ml or the model creation will break
-      - ml_models:${RAW_MODEL_STORAGE_PATH}
-      - ml_jobs:/data/geoimagenet/jobs
-      # images location for patch extraction
-      - image_data:/data/geoimagenet/images
-    depends_on:
-      - mongodb
-    links:
-      - mongodb
-    environment:
-      - GEOIMAGENET_ML_API_URL=https://${HOST_FQDN}/ml
-      - MAGPIE_USER_URL=http://magpie:2001/users/current
-    env_file:
-      - ./config/mongodb/credentials.env
-    restart: unless-stopped
-
   nginx:
     image: pavics/canarieapi:0.4.3
     container_name: nginx
@@ -132,7 +94,6 @@ services:
       - "443:443"
     depends_on:
       - api
-      - ml
       - frontend
       - geoserver
       - twitcher
@@ -233,32 +194,6 @@ services:
       timeout: 10s
       retries: 3
 
-  mongodb:
-    image: mongo:3.4.0
-    container_name: mongodb
-    volumes:
-      - mongodb_data:/data/db
-    # Mongodb crash with permission denied errors if the command is not overridden like this
-    command: bash -c 'chown -R mongodb:mongodb /data && chmod -R 755 /data && mongod'
-    restart: always
-
-  mongodb_backup:
-    # https://github.com/stefanprodan/mgob
-    image: stefanprodan/mgob:0.9
-    container_name: mongodb_backup
-    environment:
-      - HOSTNAME=${HOST_FQDN}
-    volumes:
-      - ./config/mongodb/backup.yml:/config/geoimagenet_mongodb_backup.yml
-      - mongodb_backups:/storage
-      - mongodb_data:/data
-      - /tmp:/tmp
-    depends_on:
-      - mongodb
-    links:
-      - mongodb
-    restart: unless-stopped
-
   magpie:
     image: pavics/magpie:1.6.0
     container_name: magpie
@@ -313,24 +248,6 @@ volumes:
       type: none
       o: bind
       device: /nas
-  ml_datasets:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /data/ml/datasets
-  ml_models:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /data/ml/models
-  ml_jobs:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /data/ml/jobs
   postgis_data:
     driver: local
     driver_opts:
@@ -343,18 +260,6 @@ volumes:
       type: none
       o: bind
       device: /data/postgis_backups
-  mongodb_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /data/mongodb_persist
-  mongodb_backups:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /data/mongodb_backups
   geoserver_data:
     driver: local
     driver_opts:
