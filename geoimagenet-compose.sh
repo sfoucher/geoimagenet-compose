@@ -14,6 +14,7 @@ VARS='
   $POSTGIS_USER
   $POSTGIS_PASSWORD
   $SSL_CERTIFICATE
+  $SSL_PRIVATE_KEY
   $MAGPIE_ADMIN_USER
   $MAGPIE_ADMIN_PW
   $MAGPIE_SECRET
@@ -36,7 +37,7 @@ do
   if [[ -z "${!v}" ]]
   then
     echo "${RED}Error${NORMAL}: Required variable ${v} is not set. Check env.local file."
-    exit
+    exit 1
   fi
 done
 

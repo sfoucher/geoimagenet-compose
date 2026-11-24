@@ -43,7 +43,7 @@ First run needs `env.local` (copy `env.local.example`) and the bind-mount direct
   - Edit the `.template`, never the generated file; the generated file is overwritten on every wrapper call.
   - A new template must be `git add`ed before the wrapper will render it.
 - `envsubst` only substitutes the variables listed in `VARS` inside `geoimagenet-compose.sh`. A variable that is not listed there stays as a literal `${...}` in the output. For example, `PHOENIX_PASSWORD` in `magpie.env.template` is not substituted today.
-- Every variable in `VARS` must be non-empty, or the wrapper exits.
+- Every variable in `VARS` must be non-empty, or the wrapper exits with status 1.
 - Local overrides (ports, CORS, dev SSL settings, image swaps) belong in `docker-compose.override.yml`, which is gitignored. README.md has the local-dev override and the self-signed certificate steps.
 - The version string lives in three places that are kept in sync by bump2version (`setup.cfg`): `docker-compose.yml` (`GEOIMAGENET_VERSION`), `canarie_api_config.py.template` and `doc.html.template`.
 
@@ -71,7 +71,5 @@ First run needs `env.local` (copy `env.local.example`) and the bind-mount direct
 - **The CRIM images (`docker-registry.crim.ca/...`) are only reachable on the CRIM network.** Elsewhere, build them from the GitHub repos at the pinned tags (see `DEPLOYMENT_PLAN.md` §5, Phase 1).
 - **GeoServer is set to `-Xmx10G`.** Reduce it in the override file on hosts with less than about 24 GB of RAM. With the kartoza image, set `MAXIMUM_MEMORY` and replace `JAVA_OPTS`: its entrypoint appends its own heap flags, built from `MAXIMUM_MEMORY`, after `JAVA_OPTS`.
 - **`docker-compose.override.yml.example`** is the working local override (source builds, kartoza GeoServer, 4 GB heap). Copy it to `docker-compose.override.yml`.
-- **Committed credentials need rotating before production:**
-  - default passwords in `env.local.example`, `admin-project-credentials.env` and the GeoServer admin account;
-  - a GitHub OAuth client secret in `magpie.env.template`;
-  - a Slack webhook in `config/mongodb/backup.yml`.
+- **Secrets come only from `env.local`** (on branch `feature/annotation-only`). Generate each with `openssl rand -hex 32`; hex avoids escaping in the Twitcher database URL. The default passwords, the GitHub OAuth secret and the Slack webhook were removed from the tracked files, but they remain in Git history and in CRIM's public repository, so CRIM must revoke the OAuth secret and the webhook.
+- **GeoServer's admin password is applied on first start only** (kartoza writes a lock file into the data dir). Changing `GEOIMAGENET_API_GS_MIRROR_PASSWORD` later needs the password changed in GeoServer too.
