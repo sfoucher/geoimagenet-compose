@@ -1,0 +1,35 @@
+# Local override for hosts without access to docker-registry.crim.ca.
+# Copy to docker-compose.override.yml (gitignored) and adjust.
+# See DEPLOYMENT_PLAN.md, section 5 (Phase 1) and section 10.
+
+services:
+  # Build the CRIM images from the sibling source repos (DEPLOYMENT_PLAN.md, section 9).
+  # Compose tags the result with the image name in docker-compose.yml, so `migrations`
+  # and `geoserver_setup`, which reuse the api image, pick up the local build too.
+  api:
+    build: ../geoimagenet-api                # branch fix/build-2026
+    environment:
+      # local only: self-signed certificate
+      - GEOIMAGENET_API_MAGPIE_VERIFY_SSL=false
+
+  frontend:
+    build: ../geoimagenet-frontend
+
+  # No source exists for the custom geoimagenet/geoserver:2.14.0 image, and Docker Hub has
+  # no kartoza/geoserver 2.14 tag. 2.15.0 (2019) is the closest kartoza release.
+  geoserver:
+    image: kartoza/geoserver:2.15.0
+    environment:
+      # The kartoza entrypoint rebuilds GEOSERVER_OPTS from INITIAL_MEMORY/MAXIMUM_MEMORY
+      # and appends it to JAVA_OPTS, so the heap is set here, not with -Xmx.
+      # Replacing JAVA_OPTS removes the base file's -Xmx10G.
+      - JAVA_OPTS=-Djava.awt.headless=true
+      - GEOSERVER_OPTS=
+      - INITIAL_MEMORY=1G
+      - MAXIMUM_MEMORY=4G
+      # Applied on first start only (the image writes a lock file in the data dir).
+      # Empty falls back to the image default, "geoserver".
+      - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_MIRROR_PASSWORD}
+    # local only: reach GeoServer directly at http://localhost:8600/geoserver, bypassing Twitcher
+    ports:
+      - "8600:8080"

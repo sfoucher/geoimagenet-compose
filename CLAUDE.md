@@ -17,7 +17,7 @@ Deployment orchestration only for the GeoImageNet platform (CRIM). There is no a
 
 - The tags must match the image tags in `docker-compose.yml`. Bump both together.
 - The `ml` build also installs `crim-ca/gin-model-repo@1.0.1` (from GitHub) and `thelper==0.6.2` (from PyPI). Neither needs cloning unless you modify it.
-- No public source exists for `geoimagenet/geoserver:2.14.0`. Substitute `kartoza/geoserver:2.14.0` via the override file.
+- No public source exists for `geoimagenet/geoserver:2.14.0`. Substitute `kartoza/geoserver:2.15.0` via the override file (no kartoza 2.14 tag exists).
 - `crim-ca/geoimagenet` contains only example notebooks for model packaging; the platform doesn't need it.
 - The source repos are cloned as siblings of this repo under `~/DEV/geoimagenet/`. A local `docker-compose.override.yml` can point `build: ../geoimagenet-<name>` at them, so `./geoimagenet-compose.sh build <service>` builds from source. Details are in `DEPLOYMENT_PLAN.md` §9.
 
@@ -69,7 +69,8 @@ First run needs `env.local` (copy `env.local.example`) and the bind-mount direct
 - **PostGIS breaks after an unnecessary image pull** (`could not access file "$libdir/postgis-2.5"`). Pull only the images you are updating. The recovery procedure (wipe the data dir, re-init, `pg_restore` from `/data/postgis_backups`) is in README.md.
 - **The wrapper calls the v1 `docker-compose` binary.** Hosts that only have the `docker compose` plugin need a shim or an edit to the wrapper.
 - **The CRIM images (`docker-registry.crim.ca/...`) are only reachable on the CRIM network.** Elsewhere, build them from the GitHub repos at the pinned tags (see `DEPLOYMENT_PLAN.md` §5, Phase 1).
-- **GeoServer is set to `-Xmx10G`.** Reduce it in the override file on hosts with less than about 24 GB of RAM.
+- **GeoServer is set to `-Xmx10G`.** Reduce it in the override file on hosts with less than about 24 GB of RAM. With the kartoza image, set `MAXIMUM_MEMORY` and replace `JAVA_OPTS`: its entrypoint appends its own heap flags, built from `MAXIMUM_MEMORY`, after `JAVA_OPTS`.
+- **`docker-compose.override.yml.example`** is the working local override (source builds, kartoza GeoServer, 4 GB heap). Copy it to `docker-compose.override.yml`.
 - **Committed credentials need rotating before production:**
   - default passwords in `env.local.example`, `admin-project-credentials.env` and the GeoServer admin account;
   - a GitHub OAuth client secret in `magpie.env.template`;
