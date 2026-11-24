@@ -35,7 +35,7 @@ make VERSION=x.y.z bump                                     # bump2version: comm
 make VERSION=x.y.z dry bump                                 # preview only
 ```
 
-First run needs `env.local` (copy `env.local.example`) and the bind-mount directories created on the host (`/nas`, `/data/...`; the exact `mkdir` is in README.md).
+First run: follow README.md (the verified operations guide: installation order, imagery loading, daily operation, users, backups). It needs `env.local` (copy `env.local.example`), the override (copy `docker-compose.override.yml.example`) and the bind-mount directories on the host.
 
 ## How configuration works (read before editing config/)
 
