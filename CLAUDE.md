@@ -67,7 +67,7 @@ First run needs `env.local` (copy `env.local.example`) and the bind-mount direct
 ## Gotchas
 
 - **PostGIS breaks after an unnecessary image pull** (`could not access file "$libdir/postgis-2.5"`). Pull only the images you are updating. The recovery procedure (wipe the data dir, re-init, `pg_restore` from `/data/postgis_backups`) is in README.md.
-- **The wrapper calls the v1 `docker-compose` binary.** Hosts that only have the `docker compose` plugin need a shim or an edit to the wrapper.
+- **The wrapper calls the `docker compose` v2 plugin** (changed from the v1 `docker-compose` binary on branch `docs/deployment-plan`). Hosts with only v1 need the plugin installed.
 - **The CRIM images (`docker-registry.crim.ca/...`) are only reachable on the CRIM network.** Elsewhere, build them from the GitHub repos at the pinned tags (see `DEPLOYMENT_PLAN.md` §5, Phase 1).
 - **GeoServer is set to `-Xmx10G`.** Reduce it in the override file on hosts with less than about 24 GB of RAM. With the kartoza image, set `MAXIMUM_MEMORY` and replace `JAVA_OPTS`: its entrypoint appends its own heap flags, built from `MAXIMUM_MEMORY`, after `JAVA_OPTS`.
 - **`docker-compose.override.yml.example`** is the working local override (source builds, kartoza GeoServer, 4 GB heap). Copy it to `docker-compose.override.yml`.
