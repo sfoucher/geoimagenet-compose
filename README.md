@@ -2,7 +2,7 @@
 
 Deployment of the GeoImageNet annotation platform with Docker Compose. This repo holds no application code: the services run images built from the sibling `geoimagenet-api` and `geoimagenet-frontend` repos.
 
-This guide covers the **annotation-only** setup (branch `feature/annotation-only`, without the ML, GraphQL and MongoDB services). Every procedure below was run end to end on a local WSL2 host on 2026-11-24. The reasons behind each step, the security findings and the hosting options are in [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md).
+This guide covers the **annotation-only** setup (branch `feature/annotation-only`, without the ML, GraphQL and MongoDB services). Every procedure below was run end to end on a local WSL2 host on 2026-11-24. The reasons behind each step, the security findings and the hosting options are in the deployment plan, [`../DEPLOYMENT_PLAN.md`](../DEPLOYMENT_PLAN.md) (kept outside this repo).
 
 - [How it fits together](#how-it-fits-together)
 - [Prerequisites](#prerequisites)
@@ -132,7 +132,7 @@ The `frontend` container builds the web interface into a shared volume, then exi
 
 The platform's `geoserver` does not read the image files. It cascades WMS from the **datastore GeoServer** (`geoserver-datastore`), which serves the GeoTIFFs in `/nas`. `geoserver_setup` configures both and registers each image in the database.
 
-**1. Prepare each image.** Requirements (details in DEPLOYMENT_PLAN.md §10.2):
+**1. Prepare each image.** Requirements (details in `../DEPLOYMENT_PLAN.md` §10.2):
 
 - 8-bit, 4 bands in R, G, B, NIR order (or 3-band RGB).
 - File name matching `Pleiades_<YYYYMMDD>_<BANDS>_50cm_<BITS>bits_AOI_<n>_<City>_<PROV>.tif`. `50cm` is fixed text in the pattern.

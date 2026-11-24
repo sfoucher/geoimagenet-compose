@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Deployment orchestration only for the GeoImageNet platform (CRIM). There is no application source here, no build, and no tests. The app code lives in separate repos (`crim-ca/geoimagenet-api`, `-frontend`, `-ml`, `-graphql`) and is consumed as pinned Docker images. See `DEPLOYMENT_PLAN.md` for the full analysis, the deployment plan, the modernization roadmap and the cloud hosting options.
+Deployment orchestration only for the GeoImageNet platform (CRIM). There is no application source here, no build, and no tests. The app code lives in separate repos (`crim-ca/geoimagenet-api`, `-frontend`, `-ml`, `-graphql`) and is consumed as pinned Docker images. See `../DEPLOYMENT_PLAN.md` for the full analysis, the deployment plan, the modernization roadmap and the cloud hosting options.
 
 ## Source repos for the custom images
 
@@ -19,7 +19,7 @@ Deployment orchestration only for the GeoImageNet platform (CRIM). There is no a
 - The `ml` build also installs `crim-ca/gin-model-repo@1.0.1` (from GitHub) and `thelper==0.6.2` (from PyPI). Neither needs cloning unless you modify it.
 - No public source exists for `geoimagenet/geoserver:2.14.0`. Substitute `kartoza/geoserver:2.15.0` via the override file (no kartoza 2.14 tag exists).
 - `crim-ca/geoimagenet` contains only example notebooks for model packaging; the platform doesn't need it.
-- The source repos are cloned as siblings of this repo under `~/DEV/geoimagenet/`. A local `docker-compose.override.yml` can point `build: ../geoimagenet-<name>` at them, so `./geoimagenet-compose.sh build <service>` builds from source. Details are in `DEPLOYMENT_PLAN.md` §9.
+- The source repos are cloned as siblings of this repo under `~/DEV/geoimagenet/`. A local `docker-compose.override.yml` can point `build: ../geoimagenet-<name>` at them, so `./geoimagenet-compose.sh build <service>` builds from source. Details are in `../DEPLOYMENT_PLAN.md` §9.
 
 ## Commands
 
@@ -68,17 +68,17 @@ First run: follow README.md (the verified operations guide: installation order, 
 
 - **PostGIS breaks after an unnecessary image pull** (`could not access file "$libdir/postgis-2.5"`). Pull only the images you are updating. The recovery procedure (wipe the data dir, re-init, `pg_restore` from `/data/postgis_backups`) is in README.md.
 - **The wrapper calls the `docker compose` v2 plugin** (changed from the v1 `docker-compose` binary on branch `docs/deployment-plan`). Hosts with only v1 need the plugin installed.
-- **The CRIM images (`docker-registry.crim.ca/...`) are only reachable on the CRIM network.** Elsewhere, build them from the GitHub repos at the pinned tags (see `DEPLOYMENT_PLAN.md` §5, Phase 1).
+- **The CRIM images (`docker-registry.crim.ca/...`) are only reachable on the CRIM network.** Elsewhere, build them from the GitHub repos at the pinned tags (see `../DEPLOYMENT_PLAN.md` §5, Phase 1).
 - **GeoServer is set to `-Xmx10G`.** Reduce it in the override file on hosts with less than about 24 GB of RAM. With the kartoza image, set `MAXIMUM_MEMORY` and replace `JAVA_OPTS`: its entrypoint appends its own heap flags, built from `MAXIMUM_MEMORY`, after `JAVA_OPTS`.
 - **`docker-compose.override.yml.example`** is the working local override (source builds, kartoza GeoServer, 4 GB heap). Copy it to `docker-compose.override.yml`.
 - **Secrets come only from `env.local`** (on branch `feature/annotation-only`). Generate each with `openssl rand -hex 32`; hex avoids escaping in the Twitcher database URL. The default passwords, the GitHub OAuth secret and the Slack webhook were removed from the tracked files, but they remain in Git history and in CRIM's public repository, so CRIM must revoke the OAuth secret and the webhook.
-- **First initialization has three traps** (the verified sequence is in `DEPLOYMENT_PLAN.md` §5, Phase 4):
+- **First initialization has three traps** (the verified sequence is in `../DEPLOYMENT_PLAN.md` §5, Phase 4):
   - `pg_isready` succeeds before the kartoza image has created the user; wait for a real login.
   - Only the `gis` database is created automatically. Create `magpie` and `twitcher` by hand.
   - Magpie's first start must use `--workers 1`; concurrent workers corrupt its database migration.
 - **Restart nginx after restarting any single service**; it keeps the old container IP and returns 502. The wrapper only does it after `up`.
 - **Keep the Twitcher ACL cache disabled** (`cache.regions = acl` in `twitcher.ini.template`): incompatible with route-level permissions in Magpie 1.6.
-- **Imagery path:** the platform's `geoserver` cascades WMS from a separate datastore GeoServer (`geoserver-datastore` locally, see the override example), which serves the GeoTIFFs from `/nas`. `geoserver_setup --setup-datastore` configures both. The datastore's tile cache needs `<fullWMS>true</fullWMS>` in `gwc/geowebcache.xml` (steps in `DEPLOYMENT_PLAN.md` §10.2).
+- **Imagery path:** the platform's `geoserver` cascades WMS from a separate datastore GeoServer (`geoserver-datastore` locally, see the override example), which serves the GeoTIFFs from `/nas`. `geoserver_setup --setup-datastore` configures both. The datastore's tile cache needs `<fullWMS>true</fullWMS>` in `gwc/geowebcache.xml` (steps in `../DEPLOYMENT_PLAN.md` §10.2).
 - **Never use `_` in a GeoServer container name** others call over HTTP: Tomcat answers 400 to such Host headers.
 - **If a kartoza/geoserver 2.15 container answers 404 on `/geoserver` after a restart, recreate it** (`up -d --force-recreate <service>`). It happened once (Tomcat `StackOverflowError` scanning annotations); later restarts of both GeoServers worked.
 - **The wrapper now returns compose's exit status.** It used to end with the nginx loop's status, so failed `run` commands exited 0.

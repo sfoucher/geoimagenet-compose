@@ -1,9 +1,9 @@
 # Local override for hosts without access to docker-registry.crim.ca.
 # Copy to docker-compose.override.yml (gitignored) and adjust.
-# See DEPLOYMENT_PLAN.md, section 5 (Phase 1) and section 10.
+# See ../DEPLOYMENT_PLAN.md, section 5 (Phase 1) and section 10.
 
 services:
-  # Build the CRIM images from the sibling source repos (DEPLOYMENT_PLAN.md, section 9).
+  # Build the CRIM images from the sibling source repos (../DEPLOYMENT_PLAN.md, section 9).
   # Compose tags the result with the image name in docker-compose.yml, so `migrations`
   # and `geoserver_setup`, which reuse the api image, pick up the local build too.
   api:
