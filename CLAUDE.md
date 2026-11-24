@@ -78,4 +78,8 @@ First run needs `env.local` (copy `env.local.example`) and the bind-mount direct
   - Magpie's first start must use `--workers 1`; concurrent workers corrupt its database migration.
 - **Restart nginx after restarting any single service**; it keeps the old container IP and returns 502. The wrapper only does it after `up`.
 - **Keep the Twitcher ACL cache disabled** (`cache.regions = acl` in `twitcher.ini.template`): incompatible with route-level permissions in Magpie 1.6.
+- **Imagery path:** the platform's `geoserver` cascades WMS from a separate datastore GeoServer (`geoserver-datastore` locally, see the override example), which serves the GeoTIFFs from `/nas`. `geoserver_setup --setup-datastore` configures both. The datastore's tile cache needs `<fullWMS>true</fullWMS>` in `gwc/geowebcache.xml` (steps in `DEPLOYMENT_PLAN.md` §10.2).
+- **Never use `_` in a GeoServer container name** others call over HTTP: Tomcat answers 400 to such Host headers.
+- **Recreate, don't restart, kartoza/geoserver 2.15 containers** (`up -d --force-recreate`); `restart` fails to redeploy the webapp (`/geoserver` 404).
+- **The wrapper now returns compose's exit status.** It used to end with the nginx loop's status, so failed `run` commands exited 0.
 - **GeoServer's admin password is applied on first start only** (kartoza writes a lock file into the data dir). Changing `GEOIMAGENET_API_GS_MIRROR_PASSWORD` later needs the password changed in GeoServer too.

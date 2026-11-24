@@ -131,7 +131,10 @@ services:
       - POSTGRES_DB=${POSTGIS_DB}
       - POSTGRES_USER=${POSTGIS_USER}
       - POSTGRES_PASS=${POSTGIS_PASSWORD}
-      # - ALLOW_IP_RANGE=0.0.0.0/0
+      # kartoza/postgis only accepts SSL from Docker networks by default; GeoServer's PostGIS
+      # store (annotation WFS) connects without SSL. Allow password logins from Docker's
+      # private address pool only. The PostGIS port is not published.
+      - ALLOW_IP_RANGE=172.16.0.0/12
     # Use docker-compose.override.yml to open ports as required
     # ports:
     #   - "5432:5432"

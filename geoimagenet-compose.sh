@@ -65,6 +65,7 @@ git ls-files -z \*.template |
   done
 
 docker compose "$@"
+status=$?
 
 # we restart the proxy after an up to make sure nginx continue to work if any container IP address changes
 while [[ $# -gt 0 ]]
@@ -72,3 +73,6 @@ do
   [[ $1 == "up" ]] && { docker compose restart nginx; }
   shift
 done
+
+# report compose's status, not the loop's (a failed `run` used to exit 0)
+exit $status
