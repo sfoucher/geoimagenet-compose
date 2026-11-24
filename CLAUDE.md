@@ -80,7 +80,7 @@ First run needs `env.local` (copy `env.local.example`) and the bind-mount direct
 - **Keep the Twitcher ACL cache disabled** (`cache.regions = acl` in `twitcher.ini.template`): incompatible with route-level permissions in Magpie 1.6.
 - **Imagery path:** the platform's `geoserver` cascades WMS from a separate datastore GeoServer (`geoserver-datastore` locally, see the override example), which serves the GeoTIFFs from `/nas`. `geoserver_setup --setup-datastore` configures both. The datastore's tile cache needs `<fullWMS>true</fullWMS>` in `gwc/geowebcache.xml` (steps in `DEPLOYMENT_PLAN.md` §10.2).
 - **Never use `_` in a GeoServer container name** others call over HTTP: Tomcat answers 400 to such Host headers.
-- **Recreate, don't restart, kartoza/geoserver 2.15 containers** (`up -d --force-recreate`); `restart` fails to redeploy the webapp (`/geoserver` 404).
+- **If a kartoza/geoserver 2.15 container answers 404 on `/geoserver` after a restart, recreate it** (`up -d --force-recreate <service>`). It happened once (Tomcat `StackOverflowError` scanning annotations); later restarts of both GeoServers worked.
 - **The wrapper now returns compose's exit status.** It used to end with the nginx loop's status, so failed `run` commands exited 0.
 - **Server-to-server calls must use internal addresses** (`http://magpie:2001`, `http://geoserver:8080`), never `https://${HOST_FQDN}`: with `HOST_FQDN=localhost` that resolves to the calling container itself. The API's `GEOIMAGENET_API_MAGPIE_URL` used the public URL, so it couldn't identify users locally.
 - **GeoServer's admin password is applied on first start only** (kartoza writes a lock file into the data dir). Changing `GEOIMAGENET_API_GS_MIRROR_PASSWORD` later needs the password changed in GeoServer too.
