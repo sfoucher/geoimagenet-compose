@@ -41,7 +41,10 @@ services:
       - GEOIMAGENET_API_POSTGIS_HOST=postgis
       - GEOIMAGENET_API_POSTGIS_USER=${POSTGIS_USER}
       - GEOIMAGENET_API_POSTGIS_PASSWORD=${POSTGIS_PASSWORD}
-      - GEOIMAGENET_API_MAGPIE_URL=https://${HOST_FQDN}/magpie
+      # internal address: the API forwards the user's cookies to identify them. Through
+      # https://${HOST_FQDN} this failed whenever HOST_FQDN is localhost (it resolves to the
+      # api container itself), and in production it looped out through nginx.
+      - GEOIMAGENET_API_MAGPIE_URL=http://magpie:2001
       - GEOIMAGENET_API_BATCH_CREATION_URL=https://${HOST_FQDN}/ml/processes/batch-creation/jobs
       - GEOIMAGENET_API_MAGPIE_VERIFY_SSL=true
       - GEOIMAGENET_API_ALLOW_CORS=false
