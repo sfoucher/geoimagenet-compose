@@ -62,11 +62,11 @@ git ls-files -z \*.template |
     cat ${FILE} | envsubst "${VARS}" > ${DEST}
   done
 
-docker-compose $*
+docker compose "$@"
 
 # we restart the proxy after an up to make sure nginx continue to work if any container IP address changes
 while [[ $# -gt 0 ]]
 do
-  [[ $1 == "up" ]] && { docker-compose restart nginx; }
+  [[ $1 == "up" ]] && { docker compose restart nginx; }
   shift
 done
