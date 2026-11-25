@@ -161,20 +161,20 @@ Resulting layout:
 
 The imagery is licensed (Airbus). Keep it out of Git and of any public storage.
 
-**2. Enable "full WMS" on the datastore (once per datastore).** The cascade sends requests that are not aligned to the datastore's tile grid; without this setting they fail with 400.
-
-```bash
-docker exec geoserver-datastore sh -c 'f=/opt/geoserver/data_dir/gwc/geowebcache.xml; grep -q "<fullWMS>" $f || sed -i "s|^  <layers/>$|  <layers/>\n  <fullWMS>true</fullWMS>|" $f'
-./geoimagenet-compose.sh up -d --force-recreate geoserver-datastore
-```
-
-**3. Publish.** Rerun this after adding images; it skips what already exists.
+**2. Publish.** Rerun this after adding images; it skips what already exists.
 
 ```bash
 ./geoimagenet-compose.sh run --rm geoserver_setup --setup-datastore
 ```
 
 It must end without a traceback. Each image is then listed as `PLEIADES_RGB:<image>` and `PLEIADES_NRG:<image>` in the map's layer switcher.
+
+**3. Enable "full WMS" on the datastore (once per datastore, after the first publish).** The cascade sends requests that are not aligned to the datastore's tile grid; without this setting they fail with 400. It must come after the first `geoserver_setup`: a fresh datastore only writes the `<layers/>` line this command edits during its first configuration (otherwise the command silently changes nothing; it should print `1`).
+
+```bash
+docker exec geoserver-datastore sh -c 'f=/opt/geoserver/data_dir/gwc/geowebcache.xml; grep -q "<fullWMS>" $f || sed -i "s|^  <layers/>$|  <layers/>\n  <fullWMS>true</fullWMS>|" $f; grep -c "<fullWMS>true" $f'
+./geoimagenet-compose.sh up -d --force-recreate geoserver-datastore
+```
 
 ## Daily operation
 
