@@ -1,0 +1,60 @@
+# Server override (a local Linux server, a VM on OpenStack or in a cloud).
+# Same as docker-compose.override.yml.example minus its two local-only settings:
+# GeoServer is not published on port 8600 (that would bypass Twitcher's access control),
+# and Magpie SSL verification is not disabled. Use with a real certificate and
+# TWITCHER_SSL_VERIFY=true in env.local.
+# Copy to docker-compose.override.yml (gitignored) and adjust.
+# See ../DEPLOYMENT_PLAN.md, section 5 (Phase 1) and section 10.
+
+services:
+  # Build the CRIM images from the sibling source repos (../DEPLOYMENT_PLAN.md, section 9).
+  # Compose tags the result with the image name in docker-compose.yml, so `migrations`
+  # and `geoserver_setup`, which reuse the api image, pick up the local build too.
+  api:
+    build: ../geoimagenet-api                # branch fix/build-2026
+
+  frontend:
+    build: ../geoimagenet-frontend
+
+  # No source exists for the custom geoimagenet/geoserver:2.14.0 image, and Docker Hub has
+  # no kartoza/geoserver 2.14 tag. 2.15.0 (2019) is the closest kartoza release.
+  geoserver:
+    image: kartoza/geoserver:2.15.0
+    environment:
+      # The kartoza entrypoint rebuilds GEOSERVER_OPTS from INITIAL_MEMORY/MAXIMUM_MEMORY
+      # and appends it to JAVA_OPTS, so the heap is set here, not with -Xmx.
+      # Replacing JAVA_OPTS removes the base file's -Xmx10G.
+      - JAVA_OPTS=-Djava.awt.headless=true
+      - GEOSERVER_OPTS=
+      - INITIAL_MEMORY=1G
+      - MAXIMUM_MEMORY=4G
+      # Applied on first start only (the image writes a lock file in the data dir).
+      # Empty falls back to the image default, "geoserver".
+      - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_MIRROR_PASSWORD}
+
+  # Datastore GeoServer: serves the GeoTIFFs in /nas. The platform's `geoserver` (the
+  # "mirror") cascades its layers over WMS. CRIM ran this on a separate server; locally
+  # it is a second container. Set in env.local:
+  #   GEOIMAGENET_API_GS_DATASTORE_URL=http://geoserver-datastore:8080/geoserver
+  # Then: ./geoimagenet-compose.sh run --rm geoserver_setup --setup-datastore
+  # The name must not contain an underscore: Tomcat rejects such Host headers with 400.
+  geoserver-datastore:
+    image: kartoza/geoserver:2.15.0
+    container_name: geoserver-datastore
+    environment:
+      - JAVA_OPTS=-Djava.awt.headless=true
+      - GEOSERVER_OPTS=
+      - INITIAL_MEMORY=1G
+      - MAXIMUM_MEMORY=2G
+      - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_DATASTORE_PASSWORD}
+    env_file:
+      - config/geoserver/docker-env/geoserver.env
+    volumes:
+      - /data/geoserver_datastore/data_dir:/opt/geoserver/data_dir
+      # same path as in geoserver_setup: stores are registered as file:/nas/...
+      - /nas:/nas:ro
+    restart: unless-stopped
+
+  geoserver_setup:
+    depends_on:
+      - geoserver-datastore

@@ -76,6 +76,8 @@ First run: follow README.md (the verified operations guide: installation order, 
   - `pg_isready` succeeds before the kartoza image has created the user; wait for a real login.
   - Only the `gis` database is created automatically. Create `magpie` and `twitcher` by hand.
   - Magpie's first start must use `--workers 1`; concurrent workers corrupt its database migration.
+- **Stop the platform with `down`, not `stop`**: `magpie`, `twitcher` and `nginx` have `restart: always` and would come back alone at the next boot. `down` keeps all data (bind mounts and named volumes).
+- **Servers use `docker-compose.override.server.yml.example`**: the local example publishes GeoServer on 8600, bypassing Twitcher, and disables Magpie SSL verification.
 - **Restart nginx after restarting any single service**; it keeps the old container IP and returns 502. The wrapper only does it after `up`.
 - **Keep the Twitcher ACL cache disabled** (`cache.regions = acl` in `twitcher.ini.template`): incompatible with route-level permissions in Magpie 1.6.
 - **Imagery path:** the platform's `geoserver` cascades WMS from a separate datastore GeoServer (`geoserver-datastore` locally, see the override example), which serves the GeoTIFFs from `/nas`. `geoserver_setup --setup-datastore` configures both. The datastore's tile cache needs `<fullWMS>true</fullWMS>` in `gwc/geowebcache.xml` (steps in `../DEPLOYMENT_PLAN.md` §10.2).

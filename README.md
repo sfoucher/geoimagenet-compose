@@ -9,6 +9,7 @@ This guide covers the **annotation-only** setup (branch `feature/annotation-only
 - [First installation](#first-installation)
 - [Loading imagery](#loading-imagery)
 - [Daily operation](#daily-operation)
+- [Deploying on a local Linux server](#deploying-on-a-local-linux-server)
 - [Users and roles](#users-and-roles)
 - [Backups and restore](#backups-and-restore)
 - [Known traps](#known-traps)
@@ -181,11 +182,12 @@ It must end without a traceback. Each image is then listed as `PLEIADES_RGB:<ima
 SERVICES="postgis postgis_backups migrations api geoserver geoserver-datastore magpie twitcher frontend nginx"
 
 ./geoimagenet-compose.sh up -d $SERVICES     # start, or bring everything back after a reboot
-./geoimagenet-compose.sh stop                # stop, keeping the containers
+./geoimagenet-compose.sh down                # stop and remove the containers; all data is kept
 ./geoimagenet-compose.sh ps                  # status
 ./geoimagenet-compose.sh logs -f api         # follow one service
 ```
 
+- **Stop with `down`, not `stop`.** `magpie`, `twitcher` and `nginx` have `restart: always`: after `stop`, Docker starts them again by itself at the next boot, leaving a half-started platform on port 443. `down` removes the containers but none of the data (databases, GeoServer configuration and imagery are in `/data` and `/nas`; `down` without `-v` keeps the volumes), and `up -d` recreates them identically. Verified on 2026-11-25.
 - **After a reboot, run the `up -d` line.** Docker does not restart the platform's `geoserver` on its own (its restart policy is `on-failure`), so the map stays empty until you do.
 - **After restarting a single service, restart nginx too**, or nginx keeps the old container address and returns 502:
 
@@ -196,6 +198,82 @@ SERVICES="postgis postgis_backups migrations api geoserver geoserver-datastore m
   `up` restarts nginx automatically; `restart` does not.
 - **If a GeoServer answers 404 on `/geoserver` after a restart, recreate it:** `./geoimagenet-compose.sh up -d --force-recreate geoserver` (or `geoserver-datastore`). It happened once with the kartoza 2.15 image.
 - **Never run a bare `pull`.** Pulling the PostGIS image unnecessarily can break it (see [Backups and restore](#backups-and-restore)). Name the images you mean to update.
+
+## Deploying on a local Linux server
+
+The same procedure on a dedicated Linux machine (physical or VM) on your network, used **on demand**: started for an annotation period, stopped in between. Not yet tried on such a server; the differences from the WSL setup are below.
+
+**1. Hardware**
+
+| Resource | Minimum | Recommended | Why |
+|---|---|---|---|
+| CPU | 4 cores | 8 cores | map tile rendering |
+| RAM | 16 GB | 32 GB | 8–9 GB peak measured, plus the OS and the page cache for the imagery |
+| System and `/data` | 150 GB SSD | 250 GB SSD | databases, tile cache, Docker images, dumps |
+| `/nas` | 600 GB | 1 TB or more, on RAID 1 | 500 GB of imagery and room to grow |
+| Network | fixed IP | fixed IP and a DNS name | `HOST_FQDN` is compiled into the frontend |
+
+**2. System.** Ubuntu Server 24.04 LTS (or Debian 12). Install Docker Engine and the Compose plugin from Docker's repository. Mount the SSD at `/data` and the imagery disk at `/nas` in `/etc/fstab` (by UUID). Add 4 GB of swap, and limit the Docker logs in `/etc/docker/daemon.json`:
+
+```json
+{ "log-driver": "json-file", "log-opts": { "max-size": "50m", "max-file": "3" } }
+```
+
+**3. Access, host name and certificate.** Users' browsers call the URLs compiled into the frontend, so `HOST_FQDN` must be a name they can resolve, **never `localhost`**:
+
+| Access | `HOST_FQDN` | Certificate |
+|---|---|---|
+| Internal network only (lab, VPN) | a name in your internal DNS, for example `geoimagenet.lab.example.ca` | your organization's internal CA, or Let's Encrypt with the DNS-01 challenge if the domain is public (no port to open) |
+| Internet | a public name pointing to the router | Let's Encrypt (HTTP-01 through port 80, forwarded by the router) |
+
+A self-signed certificate is only for a quick test: every browser warns about it.
+
+**4. Firewall.** Only nginx publishes ports (80 and 443). Docker bypasses `ufw` for published ports, so filter at the network level (router or firewall), or in the `DOCKER-USER` iptables chain. Allow SSH only from administrators' machines.
+
+**5. Code and configuration.**
+
+```bash
+mkdir -p ~/geoimagenet && cd ~/geoimagenet
+git clone -b feature/annotation-only https://github.com/sfoucher/geoimagenet-compose
+git clone -b fix/build-2026 https://github.com/sfoucher/geoimagenet-api
+git clone -b fix/build-2026 https://github.com/sfoucher/geoimagenet-frontend
+cd geoimagenet-compose
+cp docker-compose.override.server.yml.example docker-compose.override.yml
+cp env.local.example env.local && chmod 600 env.local
+```
+
+**Use the server override**, `docker-compose.override.server.yml.example`. It differs from the local one in two settings: GeoServer is not published on port 8600 (which would bypass Twitcher's access control), and Magpie SSL verification stays on. In `env.local`: new secrets (`openssl rand -hex 32`), the real `HOST_FQDN`, the certificate paths, and `TWITCHER_SSL_VERIFY=true`.
+
+**6. Install** with [First installation](#first-installation), steps 4 to 8.
+
+**7. Data: start fresh or migrate.**
+
+- **Start fresh:** copy the imagery (`rsync -a --info=progress2 <source>/ <server>:/nas/`), then follow [Loading imagery](#loading-imagery).
+- **Migrate an existing deployment**, keeping accounts, annotations and GeoServer configuration: on the old host, run a backup (`docker exec postgis_backups /backups.sh`) and copy the dumps, `/nas` and `/data/geoserver*/data_dir` to the server with `rsync`. On the server, in installation step 6, create the databases but restore the dumps (see [Backups and restore](#backups-and-restore)) instead of running the migrations and the Magpie init. Keep the old GeoServer passwords in `env.local`: GeoServer applies a new admin password on first start only.
+
+**8. Run it on demand.**
+
+```bash
+cd ~/geoimagenet/geoimagenet-compose
+SERVICES="postgis postgis_backups migrations api geoserver geoserver-datastore magpie twitcher frontend nginx"
+
+# start an annotation period (about a minute: the frontend rebuilds)
+sudo apt update && sudo apt upgrade        # the machine is often off: update at each start
+sudo certbot renew                         # Let's Encrypt only; does nothing if still valid
+./geoimagenet-compose.sh up -d $SERVICES
+
+# end of the period
+docker exec postgis_backups /backups.sh    # the 23:00 automatic dump only runs if the server is up
+rsync -a /data/postgis_backups/ <backup-host>:geoimagenet-backups/
+./geoimagenet-compose.sh down
+```
+
+- **Use `down` to stop**, not `stop`, or `magpie`, `twitcher` and `nginx` start again by themselves at the next boot.
+- **Back up at the end of each period** and copy the dumps off the machine. RAID protects against a disk failure, not against a mistake or a lost server. Keep an offline copy of the imagery too.
+- **Let's Encrypt certificates last 90 days** and only renew while the server is on, hence `certbot renew` at each start. A certificate from an internal CA, valid for years, avoids this.
+- **Don't `pull` Docker images.** The api and frontend images are built locally and only change when you rebuild them; pulling PostGIS needlessly can break it (see [Known traps](#known-traps)).
+
+**9. Check from another machine on the network:** log in, imagery, annotation, validation, export (as in the step 11 checks of the plan), and that only ports 80 and 443, plus 22 from your machine, answer (`nmap <server>`).
 
 ## Users and roles
 
