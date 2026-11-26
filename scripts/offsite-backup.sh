@@ -59,7 +59,7 @@ D=$(date +%F)
 UP=(--header-upload "X-Delete-After: $EXPIRE")
 # copy, not sync: no DELETE right needed. Filters are first-match: the + must precede the - .
 F=(--filter '+ gwc/geowebcache.xml' --filter '- gwc/**' --filter '- logs/**')
-rc copy -v "${UP[@]}" --max-age 2d /src/dumps "${REMOTE}postgis"
+rc copy -v "${UP[@]}" --max-age 2d --include '*.dmp' /src/dumps "${REMOTE}postgis"   # never the *.dmp.rejected
 rc copy -v "${UP[@]}" "${F[@]}" /src/gs   "${REMOTE}geoserver/$D"
 rc copy -v "${UP[@]}" "${F[@]}" /src/gsds "${REMOTE}geoserver-datastore/$D"
 
