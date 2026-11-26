@@ -31,9 +31,11 @@ mkdir "$T/in" "$T/pgdata"
 
 if [ -n "$LOCAL_DIR" ]; then cp -r "$LOCAL_DIR"/. "$T/in/"; else
   # DEST is mounted at the same path, so the crypt remote's path in the config is valid in the container
-  rc() { docker run --rm --user "$(id -u):$(id -g)" -v "$RCLONE_CONFIG_FILE":/config/rclone/rconf/rclone.conf:ro \
+  [ -f "$RCLONE_CONFIG_FILE" ] || { echo "missing $RCLONE_CONFIG_FILE" >&2; exit 1; }
+  [ -d "$DEST" ] || { echo "missing $DEST" >&2; exit 1; }
+  rc() { docker run --rm --read-only --tmpfs /tmp --user "$(id -u):$(id -g)" -v "$RCLONE_CONFIG_FILE":/config/rclone/rconf/rclone.conf:ro \
     -e RCLONE_CONFIG=/config/rclone/rconf/rclone.conf -v "$DEST":"$DEST" -v "$T/in":/in "$RCLONE_IMAGE" "$@"; }
-  LAST=$(rc lsf --dirs-only "$REMOTE" | sort | tail -1)
+  LAST=$(rc lsf --dirs-only "$REMOTE" | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}/$' | sort | tail -1)
   [ -n "$LAST" ] || { echo "FAIL: no backup folder in $REMOTE" >&2; exit 1; }
   echo "Using backup folder $LAST"
   rc copy "${REMOTE}${LAST}dumps" /in

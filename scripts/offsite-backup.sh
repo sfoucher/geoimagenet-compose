@@ -5,8 +5,10 @@
 # mode used by scripts/pull-backup.sh. The rclone/Swift part is currently unused: Arbutus' Ceph RGW
 # answers 401 to every application credential restricted by access rules (see README).
 set -euo pipefail
-[ "${1:-}" = --dump-only ] && DUMP_ONLY=1
 DUMP_ONLY=${DUMP_ONLY:-0}
+case "${1:-}" in "") ;; --dump-only) DUMP_ONLY=1 ;; *) echo "Usage: $0 [--dump-only]" >&2; exit 2 ;; esac
+# In --dump-only mode, "lock held" and "platform down" exit 3 (the caller must not pull stale data).
+SKIP=0; [ "$DUMP_ONLY" = 1 ] && SKIP=3
 
 RCLONE_CONFIG_FILE=${RCLONE_CONFIG_FILE:-/etc/geoimagenet/rclone.conf}
 REMOTE=${REMOTE:-swiftcrypt:}                  # crypt remote (see scripts/rclone.conf.example)
@@ -30,10 +32,10 @@ newest() { find "$BACKUP_DIR" -name "geoimagenet_$1.*.dmp" -printf '%T@ %p\n' | 
 size_of() { if [ -n "$1" ]; then stat -c %s "$1"; else echo 0; fi; }
 
 exec 9>"$LOCK_FILE"
-flock -n 9 || { echo "Backup already running; nothing to do."; exit 0; }
+flock -n 9 || { echo "Backup already running; nothing to do."; exit $SKIP; }
 
 if [ "$(docker inspect -f '{{.State.Running}}' "$DB_CONTAINER" 2>/dev/null || true)" != true ]; then
-  echo "$DB_CONTAINER is not running (platform down): nothing changed since the last run, skipping."; exit 0
+  echo "$DB_CONTAINER is not running (platform down): nothing changed since the last run, skipping."; exit $SKIP
 fi
 wait_for() {  # wait_for "<description>" <command...>: bounded wait
   local what=$1; shift; local t=$SECONDS
@@ -60,6 +62,10 @@ for db in $DBS; do
   fi
 done
 
+# Local retention: kartoza/pg-backup:9.6 has no REMOVE_BEFORE (its backups.sh never deletes).
+case "$RCLONE_DOCKER_ARGS" in *RCLONE_DRY_RUN*) echo "Dry run: local retention skipped." ;;
+  *) find "$BACKUP_DIR" -name '*.dmp' -mtime +"$KEEP_LOCAL_DAYS" -delete ;; esac
+
 if [ "$DUMP_ONLY" = 1 ]; then
   echo "New dumps:"; find "$BACKUP_DIR" -name 'geoimagenet_*.dmp' -newer "$MARK" -print; exit 0
 fi
@@ -71,8 +77,4 @@ F=(--filter '+ gwc/geowebcache.xml' --filter '- gwc/**' --filter '- logs/**')
 rc copy -v "${UP[@]}" --max-age 2d --include '*.dmp' /src/dumps "${REMOTE}postgis"   # never the *.dmp.rejected
 rc copy -v "${UP[@]}" "${F[@]}" /src/gs   "${REMOTE}geoserver/$D"
 rc copy -v "${UP[@]}" "${F[@]}" /src/gsds "${REMOTE}geoserver-datastore/$D"
-
-# Local retention: kartoza/pg-backup:9.6 has no REMOVE_BEFORE (its backups.sh never deletes).
-case "$RCLONE_DOCKER_ARGS" in *RCLONE_DRY_RUN*) echo "Dry run: local retention skipped." ;;
-  *) find "$BACKUP_DIR" -name '*.dmp' -mtime +"$KEEP_LOCAL_DAYS" -delete ;; esac
 echo "Off-site backup $D done."
