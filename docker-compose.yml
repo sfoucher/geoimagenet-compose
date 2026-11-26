@@ -130,8 +130,10 @@ services:
     # restart: true restarts nginx when twitcher or magpie is recreated, so it never keeps
     # a stale container address (the old "502 after restarting a service" trap).
     depends_on:
+      # nginx serves what the one-shot frontend build writes into "dist"; waiting for it
+      # also keeps "up --wait" from counting its normal exit as a failure.
       frontend:
-        condition: service_started
+        condition: service_completed_successfully
       twitcher:
         condition: service_healthy
         restart: true
