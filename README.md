@@ -275,6 +275,31 @@ rsync -a /data/postgis_backups/ <backup-host>:geoimagenet-backups/
 
 **9. Check from another machine on the network:** log in, imagery, annotation, validation, export (as in the step 11 checks of the plan), and that only ports 80 and 443, plus 22 from your machine, answer (`nmap <server>`).
 
+## Resizing an OpenStack instance
+
+To change the CPU and RAM of a cloud VM (for example on the Alliance's Arbutus cloud). With an instance **booted from a volume** whose volumes all have `delete_on_termination: false`, a resize changes only CPU and RAM: the boot volume, `/data` and `/nas` stay attached, nothing to copy. Check first:
+
+```bash
+openstack server show <server> -c flavor -c image -c volumes_attached   # image: "booted from volume"
+openstack quota show                                                    # cores and ram
+openstack flavor list
+```
+
+A flavor larger than the project's `cores` or `ram` quota is refused: ask the cloud's support for a quota increase first.
+
+```bash
+ssh <vm> 'cd ~/geoimagenet/geoimagenet-compose && ./geoimagenet-compose.sh down'
+openstack server resize --flavor <new-flavor> <server>
+openstack server show <server> -c status        # wait for VERIFY_RESIZE
+openstack server resize confirm <server>        # or "resize revert" to go back
+ssh <vm> 'df -h /data /nas'                     # volumes mounted
+ssh <vm> 'cd ~/geoimagenet/geoimagenet-compose && ./geoimagenet-compose.sh up -d'
+```
+
+- **About 5 minutes of downtime**, plus a minute for the frontend rebuild.
+- **If the resize is refused**, delete the instance and create a new one from the same boot volume (`openstack server create --volume <boot-volume> --flavor <new-flavor> ...`), then attach the data volumes and the floating IP again. The IP and the DNS name don't change, so the certificate stays valid.
+- **With more RAM, raise the GeoServer heap** (`MAXIMUM_MEMORY` in `docker-compose.override.yml`), then `up -d --force-recreate geoserver geoserver-datastore`.
+
 ## Users and roles
 
 Accounts, groups and permissions live in Magpie. The administrator account is `MAGPIE_ADMIN_USER` / `MAGPIE_ADMIN_PW` from `env.local`; there is no self-registration, so the administrator creates every account.
