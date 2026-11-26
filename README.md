@@ -139,7 +139,7 @@ The platform's `geoserver` does not read the image files. It cascades WMS from t
 - File name matching `Pleiades_<YYYYMMDD>_<BANDS>_50cm_<BITS>bits_AOI_<n>_<City>_<PROV>.tif`. `50cm` is fixed text in the pattern.
 - A footprint shapefile named `..._trace.shp` (with `.shx`, `.dbf`, `.prj`). It is required: without it, `geoserver_setup` fails. Use CRIM's original traces when you have them; they match the 8-bit images even if their names say `16bits`.
 
-Convert to a Cloud-Optimized GeoTIFF (tiles and overviews make GeoServer much faster) and, if there is no original trace, compute one:
+Convert to a Cloud-Optimized GeoTIFF (tiles and overviews make GeoServer much faster) with an internal transparency mask, and, if there is no original trace, compute one. The source must declare its border pixels as NoData (`gdalinfo` shows `NoData Value=0`). `-mask 1` turns that NoData into an internal mask: GeoServer 2.15 draws NoData pixels opaque black through the RGB and NRG styles, but it does honour the mask, so the borders become transparent.
 
 ```bash
 G="docker run --rm -u $(id -u):$(id -g) -v /path/to/source:/in:ro -v /nas:/nas ghcr.io/osgeo/gdal:ubuntu-small-3.9.3"
@@ -147,7 +147,7 @@ N=Pleiades_20141025_RGBN_50cm_8bits_AOI_1_Sherbrooke_QC
 
 mkdir -p /nas/PLEIADES_RGBN_8 /nas/PLEIADES_CONTOURS
 $G gdal_translate -of COG -co COMPRESS=DEFLATE -co PREDICTOR=2 -co BLOCKSIZE=512 \
-   -co OVERVIEW_RESAMPLING=AVERAGE /in/$N.tif /nas/PLEIADES_RGBN_8/$N.tif
+   -co OVERVIEW_RESAMPLING=AVERAGE -mask 1 /in/$N.tif /nas/PLEIADES_RGBN_8/$N.tif
 # only without an original trace:
 $G gdal_footprint -ovr 3 -of "ESRI Shapefile" /nas/PLEIADES_RGBN_8/$N.tif /nas/PLEIADES_CONTOURS/${N}_trace.shp
 ```
