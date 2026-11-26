@@ -1,7 +1,7 @@
 services:
 
   frontend:
-    image: ghcr.io/sfoucher/geoimagenet-frontend:1.8.3-gin.1  # digest added after the first GHCR publish (B1)
+    image: ghcr.io/sfoucher/geoimagenet-frontend:1.8.3-gin.1@sha256:c8eb21bd4557860d14dd43bf74bff23a5e3caca0038bb9ec99acaced0fde0fe8
     container_name: frontend
     environment:
       - USING_GEOIMAGENET_COMPOSE=${USING_GEOIMAGENET_COMPOSE:?Please use geoimagenet-compose.sh script instead}
@@ -22,7 +22,7 @@ services:
       - dist:/code/dist
 
   api:
-    image: &annotation_api_image ghcr.io/sfoucher/geoimagenet-api:1.4.2-gin.1  # digest added after the first GHCR publish (B1)
+    image: &annotation_api_image ghcr.io/sfoucher/geoimagenet-api:1.4.2-gin.1@sha256:a20d63d262e85302cfe0f136d41cba78972ef71377dc532475fae696018b261e
     container_name: api
     command:
       [
