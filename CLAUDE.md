@@ -11,7 +11,7 @@ Deployment orchestration only for the GeoImageNet platform (CRIM). There is no a
 | Repo | Tag | Image |
 |---|---|---|
 | `sfoucher/geoimagenet-api` (fork of `crim-ca/`), branch `fix/build-2026` | `1.4.2-gin.1` (upstream base 1.4.2) | `ghcr.io/sfoucher/geoimagenet-api`: `api` (also used by `migrations` and `geoserver_setup`) |
-| `sfoucher/geoimagenet-frontend` (fork of `crim-ca/`), branch `fix/build-2026` | `1.8.3-gin.2` (static image, not yet published; gin.1 builds at start; upstream base 1.8.3) | `ghcr.io/sfoucher/geoimagenet-frontend`: `frontend` |
+| `sfoucher/geoimagenet-frontend` (fork of `crim-ca/`), branch `fix/build-2026` | `1.8.3-gin.2` (static image, not yet published; gin.1 builds at start; upstream base 1.8.3) | `ghcr.io/sfoucher/geoimagenet-frontend`: static files in the nginx image mount (`/public`) |
 | `crim-ca/geoimagenet-ml` | `2.2.1` | `ml` |
 | `crim-ca/geoimagenet-graphql` | `0.2.4` | `graphql` |
 
@@ -46,7 +46,7 @@ First run: follow README.md (the verified operations guide: installation order, 
 - `envsubst` only substitutes the variables listed in `VARS` inside `geoimagenet-compose.sh`. A variable that is not listed there stays as a literal `${...}` in the output. Add any new template variable to `VARS`.
 - Every variable in `VARS` must be non-empty, or the wrapper exits with status 1.
 - Local overrides (ports, CORS, dev SSL settings, image swaps) belong in `docker-compose.override.yml`, which is gitignored. README.md has the local-dev override and the self-signed certificate steps.
-- The version string lives in three places that are kept in sync by bump2version (`setup.cfg`): `docker-compose.yml` (`GEOIMAGENET_VERSION`), `canarie_api_config.py.template` and `doc.html.template`.
+- The version string lives in two places that are kept in sync by bump2version (`setup.cfg`): `canarie_api_config.py.template` and `doc.html.template` (the `GEOIMAGENET_VERSION` line went with the `frontend` service).
 
 ## Architecture (big picture)
 
