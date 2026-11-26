@@ -176,6 +176,12 @@ docker exec geoserver-datastore sh -c 'f=/opt/geoserver/data_dir/gwc/geowebcache
 ./geoimagenet-compose.sh up -d --force-recreate geoserver-datastore
 ```
 
+**4. Restrict the platform GeoServer's WMS (once per data dir).** Logged-in users may read the whole `geoserver` service, and by default its `GetMap` also returns georeferenced GeoTIFF, KMZ, and images of any size, which amounts to a download of the imagery. The script limits `GetMap` to PNG and JPEG and caps the memory and rendering time of each request, which caps the image at about 2048×2048 px. nginx also answers 404 on `/geoserver/web` and `/geoserver/rest`.
+
+```bash
+./scripts/harden-wms.sh          # prints the new settings
+```
+
 ## Daily operation
 
 ```bash

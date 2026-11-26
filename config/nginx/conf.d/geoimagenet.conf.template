@@ -56,6 +56,12 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # GeoServer's admin UI and REST API are not for users: geoserver_setup and the
+    # administrator reach them inside the Docker network (http://geoserver:8080).
+    location ^~ /geoserver/web { return 404; }
+    location ^~ /geoserver/rest { return 404; }
+    location ^~ /geoserver/j_spring_security_check { return 404; }
+
     location /geoserver {
         proxy_pass http://twitcher:8001/ows/proxy/geoserver;
         proxy_set_header Host $host;
