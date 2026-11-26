@@ -67,7 +67,9 @@ git ls-files -z \*.template |
 docker compose "$@"
 status=$?
 
-# we restart the proxy after an up to make sure nginx continue to work if any container IP address changes
+# Restart nginx after an "up": it resolves twitcher and magpie once, at start, and a
+# recreated container may get a new IP (502). depends_on restart: true covers
+# "compose restart <svc>" but not "up --force-recreate <svc>", so keep this.
 while [[ $# -gt 0 ]]
 do
   [[ $1 == "up" ]] && { docker compose restart nginx; }

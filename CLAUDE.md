@@ -27,11 +27,11 @@ Deployment orchestration only for the GeoImageNet platform (CRIM). There is no a
 Always go through the wrapper, never call compose directly. Every service requires `USING_GEOIMAGENET_COMPOSE`, which only the wrapper exports.
 
 ```bash
-./geoimagenet-compose.sh up -d                              # start everything (also restarts nginx after "up")
+./geoimagenet-compose.sh up -d --wait                       # start everything, in health order (also restarts nginx after "up")
 ./geoimagenet-compose.sh logs -f <service>
 ./geoimagenet-compose.sh pull <service> [<service>...]      # never a bare "pull" (see the PostGIS gotcha below)
-./geoimagenet-compose.sh run --rm migrations upgrade head   # init/upgrade the "gis" db (alembic)
-./geoimagenet-compose.sh run --rm magpie gunicorn -b 0.0.0.0:2001 --paste config/magpie.ini --workers 1   # init magpie db; Ctrl-C after "Starting Magpie app..."
+./geoimagenet-compose.sh run --rm migrations upgrade head   # init/upgrade the "gis" db (alembic); "up" also runs it
+./geoimagenet-compose.sh run --rm geoserver_setup ...       # profile "setup": never started by a bare "up"
 make VERSION=x.y.z bump                                     # bump2version: commits and tags
 make VERSION=x.y.z dry bump                                 # preview only
 ```
@@ -71,13 +71,13 @@ First run: follow README.md (the verified operations guide: installation order, 
 - **GeoServer is set to `-Xmx10G`.** Reduce it in the override file on hosts with less than about 24 GB of RAM. With the kartoza image, set `MAXIMUM_MEMORY` and replace `JAVA_OPTS`: its entrypoint appends its own heap flags, built from `MAXIMUM_MEMORY`, after `JAVA_OPTS`.
 - **`docker-compose.override.yml.example`** is the working local override (source builds, kartoza GeoServer, 4 GB heap). Copy it to `docker-compose.override.yml`.
 - **Secrets come only from `env.local`** (on branch `feature/annotation-only`). Generate each with `openssl rand -hex 32`; hex avoids escaping in the Twitcher database URL. The default passwords, the GitHub OAuth secret and the Slack webhook were removed from the tracked files, but they remain in Git history and in CRIM's public repository, so CRIM must revoke the OAuth secret and the webhook.
-- **First initialization has three traps** (the verified sequence is in `../DEPLOYMENT_PLAN.md` §5, Phase 4):
-  - `pg_isready` succeeds before the kartoza image has created the user; wait for a real login.
-  - Only the `gis` database is created automatically. Create `magpie` and `twitcher` by hand.
-  - Magpie's first start must use `--workers 1`; concurrent workers corrupt its database migration.
+- **First initialization is one command** (`up -d --wait`). It used to have three traps, now handled in the compose file; don't undo them:
+  - `pg_isready` succeeds before the kartoza image has created the user, so the PostGIS healthcheck does a real TCP login.
+  - Only the `gis` database is created automatically; the one-shot `db_init` creates `magpie` and `twitcher`.
+  - Concurrent Magpie workers corrupt its first database migration; `preload_app = true` in `magpie.ini.template` runs it once in the gunicorn master.
 - **Stop the platform with `down`, not `stop`**: `magpie`, `twitcher` and `nginx` have `restart: always` and would come back alone at the next boot. `down` keeps all data (bind mounts and named volumes).
 - **Servers use `docker-compose.override.server.yml.example`**: the local example publishes GeoServer on 8600, bypassing Twitcher, and disables Magpie SSL verification.
-- **Restart nginx after restarting any single service**; it keeps the old container IP and returns 502. The wrapper only does it after `up`.
+- **nginx keeps the IP it resolved at start** for `twitcher` and `magpie`. `depends_on: restart: true` restarts it on `compose restart <svc>` but **not** on `up --force-recreate <svc>` (tested), so the wrapper still restarts nginx after every `up`. Keep both.
 - **Keep the Twitcher ACL cache disabled** (`cache.regions = acl` in `twitcher.ini.template`): incompatible with route-level permissions in Magpie 1.6.
 - **Imagery path:** the platform's `geoserver` cascades WMS from a separate datastore GeoServer (`geoserver-datastore` locally, see the override example), which serves the GeoTIFFs from `/nas`. `geoserver_setup --setup-datastore` configures both. The datastore's tile cache needs `<fullWMS>true</fullWMS>` in `gwc/geowebcache.xml`. Add it **after** the first `geoserver_setup`: before that, the file has no `<layers/>` line and the README's `sed` changes nothing (it prints the match count; 1 means it worked).
 - **Never use `_` in a GeoServer container name** others call over HTTP: Tomcat answers 400 to such Host headers.

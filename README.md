@@ -94,40 +94,20 @@ On WSL2, keep these on the Linux filesystem, not under `/mnt/c`.
 ./geoimagenet-compose.sh build
 ```
 
-**6. Initialize the databases.** Follow this order exactly; each step works around a trap noted in the comments.
+**6. Start the platform.** One command. Compose orders the start by health:
+- PostGIS is healthy only once a real login works;
+- `db_init` creates the `magpie` and `twitcher` databases if they are missing;
+- `migrations` creates the schema and the taxonomies of `gis`;
+- Magpie runs its database migration once before its workers start (`preload_app` in `magpie.ini`);
+- then the API, Twitcher, the GeoServers and nginx start.
 
 ```bash
-set -a; . ./env.local; set +a
-psql_gis() { docker exec -e PGPASSWORD="$POSTGIS_PASSWORD" postgis psql -h localhost -U "$POSTGIS_USER" -d gis -Atc "$1"; }
-
-# PostGIS. pg_isready answers before the first-run setup has created the user: wait for a real login.
-./geoimagenet-compose.sh up -d postgis
-until psql_gis "select 1" >/dev/null 2>&1; do sleep 2; done
-
-# Only "gis" is created automatically. Magpie and Twitcher need their own databases.
-psql_gis "create database magpie owner $POSTGIS_USER"
-psql_gis "create database twitcher owner $POSTGIS_USER"
-
-# Schema and taxonomies of the gis database.
-./geoimagenet-compose.sh run --rm migrations upgrade head
-
-# Magpie's first start MUST use one worker: concurrent workers corrupt its database migration.
-./geoimagenet-compose.sh run -d --name magpie-init magpie \
-  gunicorn -b 0.0.0.0:2001 --paste config/magpie.ini --workers 1
-until docker logs magpie-init 2>&1 | grep -q "Starting Magpie app"; do sleep 2; done
-docker rm -f magpie-init
+./geoimagenet-compose.sh up -d --wait
 ```
 
-**7. Start the platform.**
+`--wait` returns once every service is healthy. The `frontend` container builds the web interface into a shared volume, then exits with status 0 (about a minute). `db_init` and `migrations` also exit with 0. `geoserver_setup` belongs to the `setup` profile, so `up` doesn't start it: it runs when imagery is loaded.
 
-```bash
-SERVICES="postgis postgis_backups migrations api geoserver geoserver-datastore magpie twitcher frontend nginx"
-./geoimagenet-compose.sh up -d $SERVICES
-```
-
-The `frontend` container builds the web interface into a shared volume, then exits with status 0 (about a minute). `migrations` also exits with 0. `geoserver_setup` is left out on purpose: it runs when imagery is loaded.
-
-**8. Check.** Open `https://${HOST_FQDN}` and accept the certificate warning if it is self-signed. Log in as `MAGPIE_ADMIN_USER` with `MAGPIE_ADMIN_PW`. The map stays empty until imagery is loaded.
+**7. Check.** Open `https://${HOST_FQDN}` and accept the certificate warning if it is self-signed. Log in as `MAGPIE_ADMIN_USER` with `MAGPIE_ADMIN_PW`. The map stays empty until imagery is loaded.
 
 ## Loading imagery
 
@@ -185,23 +165,15 @@ docker exec geoserver-datastore sh -c 'f=/opt/geoserver/data_dir/gwc/geowebcache
 ## Daily operation
 
 ```bash
-SERVICES="postgis postgis_backups migrations api geoserver geoserver-datastore magpie twitcher frontend nginx"
-
-./geoimagenet-compose.sh up -d $SERVICES     # start, or bring everything back after a reboot
+./geoimagenet-compose.sh up -d --wait       # start, or bring everything back after a reboot
 ./geoimagenet-compose.sh down                # stop and remove the containers; all data is kept
 ./geoimagenet-compose.sh ps                  # status
 ./geoimagenet-compose.sh logs -f api         # follow one service
 ```
 
 - **Stop with `down`, not `stop`.** `magpie`, `twitcher` and `nginx` have `restart: always`: after `stop`, Docker starts them again by itself at the next boot, leaving a half-started platform on port 443. `down` removes the containers but none of the data (databases, GeoServer configuration and imagery are in `/data` and `/nas`; `down` without `-v` keeps the volumes), and `up -d` recreates them identically. Verified on 2026-11-25.
-- **After a reboot, run the `up -d` line.** Docker does not restart the platform's `geoserver` on its own (its restart policy is `on-failure`), so the map stays empty until you do.
-- **After restarting a single service, restart nginx too**, or nginx keeps the old container address and returns 502:
-
-  ```bash
-  ./geoimagenet-compose.sh restart twitcher && ./geoimagenet-compose.sh restart nginx
-  ```
-
-  `up` restarts nginx automatically; `restart` does not.
+- **After a reboot, run the `up -d --wait` line.** Docker does not restart the platform's `geoserver` on its own (its restart policy is `on-failure`), so the map stays empty until you do.
+- **nginx and a recreated service.** nginx resolves `twitcher` and `magpie` once, at start, so a recreated container with a new address would give 502. Both cases are handled: `./geoimagenet-compose.sh restart twitcher` (or `magpie`) restarts nginx through `depends_on: restart: true`, and the wrapper restarts nginx after every `up`.
 - **If a GeoServer answers 404 on `/geoserver` after a restart, recreate it:** `./geoimagenet-compose.sh up -d --force-recreate geoserver` (or `geoserver-datastore`). It happened once with the kartoza 2.15 image.
 - **Never run a bare `pull`.** Pulling the PostGIS image unnecessarily can break it (see [Backups and restore](#backups-and-restore)). Name the images you mean to update.
 
@@ -250,23 +222,22 @@ cp env.local.example env.local && chmod 600 env.local
 
 **Use the server override**, `docker-compose.override.server.yml.example`. It differs from the local one in two settings: GeoServer is not published on port 8600 (which would bypass Twitcher's access control), and Magpie SSL verification stays on. In `env.local`: new secrets (`openssl rand -hex 32`), the real `HOST_FQDN`, the certificate paths, and `TWITCHER_SSL_VERIFY=true`.
 
-**6. Install** with [First installation](#first-installation), steps 4 to 8.
+**6. Install** with [First installation](#first-installation), steps 4 to 7.
 
 **7. Data: start fresh or migrate.**
 
 - **Start fresh:** copy the imagery (`rsync -a --info=progress2 <source>/ <server>:/nas/`), then follow [Loading imagery](#loading-imagery).
-- **Migrate an existing deployment**, keeping accounts, annotations and GeoServer configuration: on the old host, run a backup (`docker exec postgis_backups /backups.sh`) and copy the dumps, `/nas` and `/data/geoserver*/data_dir` to the server with `rsync`. On the server, in installation step 6, create the databases but restore the dumps (see [Backups and restore](#backups-and-restore)) instead of running the migrations and the Magpie init. Keep the old GeoServer passwords in `env.local`: GeoServer applies a new admin password on first start only.
+- **Migrate an existing deployment**, keeping accounts, annotations and GeoServer configuration: on the old host, run a backup (`docker exec postgis_backups /backups.sh`) and copy the dumps, `/nas` and `/data/geoserver*/data_dir` to the server with `rsync`. On the server, restore the dumps as in [Backups and restore](#backups-and-restore) instead of running installation step 6 on empty databases. Keep the old GeoServer passwords in `env.local`: GeoServer applies a new admin password on first start only.
 
 **8. Run it on demand.**
 
 ```bash
 cd ~/geoimagenet/geoimagenet-compose
-SERVICES="postgis postgis_backups migrations api geoserver geoserver-datastore magpie twitcher frontend nginx"
 
 # start an annotation period (about a minute: the frontend rebuilds)
 sudo apt update && sudo apt upgrade        # the machine is often off: update at each start
 sudo certbot renew                         # Let's Encrypt only; does nothing if still valid
-./geoimagenet-compose.sh up -d $SERVICES
+./geoimagenet-compose.sh up -d --wait
 
 # end of the period
 docker exec postgis_backups /backups.sh    # the 23:00 automatic dump only runs if the server is up
@@ -394,17 +365,18 @@ The dumps stay on the same host. Copy them elsewhere for a real backup. The back
 sudo rm -rf /data/db_gis_data/*
 docker rmi kartoza/postgis:9.6-2.4
 
-# re-create PostGIS and the magpie and twitcher databases: "First installation", step 6, up to and
-# including the migrations (skip the Magpie init: the restored dump contains its tables)
+# re-create PostGIS, the magpie and twitcher databases and the gis schema, without starting
+# Magpie (it would migrate its empty database before the restore)
+./geoimagenet-compose.sh up -d --wait postgis db_init migrations
 
 set -a; . ./env.local; set +a
-D=/data/postgis_backups/2026/November           # pick the dump folder and date
-for db in magpie gis; do
+D=/data/postgis_backups/2026/November           # pick the dump folder
+for db in gis magpie twitcher; do
+  f=$(ls -t $D/geoimagenet_$db.*.dmp | head -1)   # newest dump of that database
   docker exec -i -e PGPASSWORD="$POSTGIS_PASSWORD" postgis \
-    pg_restore -h localhost -U "$POSTGIS_USER" -d $db -c < $D/geoimagenet_$db.24-November-2026.dmp
+    pg_restore -h localhost -U "$POSTGIS_USER" -d $db -c < "$f"
 done
-SERVICES="postgis postgis_backups migrations api geoserver geoserver-datastore magpie twitcher frontend nginx"
-./geoimagenet-compose.sh up -d $SERVICES
+./geoimagenet-compose.sh up -d --wait
 ```
 
 `pg_restore` may report that it cannot drop the PostGIS extension; that error is harmless.
@@ -414,9 +386,9 @@ SERVICES="postgis postgis_backups migrations api geoserver geoserver-datastore m
 | Symptom | Cause and fix |
 |---|---|
 | Wrapper error "Required variable X is not set" | Fill in `X` in `env.local`. |
-| `password authentication failed` right after starting PostGIS for the first time | PostGIS was still in its first-run setup. Wait for a real login (installation step 6). |
+| `password authentication failed` right after starting PostGIS for the first time | PostGIS was still in its first-run setup. Its healthcheck waits for a real login; start with `up -d --wait`. |
 | Magpie logs `duplicate key` or `expected to match one row` on first start | It started with several workers. Drop and re-create the `magpie` database, then run the single-worker init. |
-| 502 from nginx after restarting a service | Restart nginx. |
+| 502 from nginx after restarting a service | `./geoimagenet-compose.sh restart nginx`. Shouldn't happen with `restart` or `up` (see Daily operation). |
 | Every call to a GeoServer container returns 400 | Its name contains `_`; Tomcat rejects such host names. Use `-`. |
 | Map tiles fail with "Content type is required" | "Full WMS" is off on the datastore (Loading imagery, step 2). |
 | Users get "There was a problem connecting to magpie" | The API must reach Magpie at `http://magpie:2001` (`GEOIMAGENET_API_MAGPIE_URL`), never through `https://${HOST_FQDN}`. |
