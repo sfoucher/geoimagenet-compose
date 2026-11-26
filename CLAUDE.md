@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Deployment orchestration only for the GeoImageNet platform (CRIM). There is no application source here, no build, and no tests. The app code lives in separate repos (`crim-ca/geoimagenet-api`, `-frontend`, `-ml`, `-graphql`) and is consumed as pinned Docker images. See `../DEPLOYMENT_PLAN.md` for the full analysis, the deployment plan, the modernization roadmap and the cloud hosting options.
+Deployment orchestration only for the GeoImageNet platform (CRIM). There is no application source here, no build, and no tests. The app code lives in separate repos (`crim-ca/geoimagenet-api`, `-frontend`, `-ml`, `-graphql`) and is consumed as pinned Docker images. Branch `feature/annotation-only` (the deployed one) keeps only annotation: the `ml`, `graphql` and `mongodb` services are removed. See `../DEPLOYMENT_PLAN.md` for the full analysis, the deployment plan, the modernization roadmap and the cloud hosting options.
 
 ## Source repos for the custom images
 
@@ -16,7 +16,8 @@ Deployment orchestration only for the GeoImageNet platform (CRIM). There is no a
 | `crim-ca/geoimagenet-graphql` | `0.2.4` | `graphql` |
 
 - The tags must match the image tags in `docker-compose.yml`. Bump both together.
-- The `ml` build also installs `crim-ca/gin-model-repo@1.0.1` (from GitHub) and `thelper==0.6.2` (from PyPI). Neither needs cloning unless you modify it.
+- `api` and `frontend` don't build from the tags any more: use branch `fix/build-2026` of the forks `sfoucher/geoimagenet-api` (dependencies pinned to 2020 releases, `geoserver_setup` fixes) and `sfoucher/geoimagenet-frontend` (ML pages hidden).
+- `ml` and `graphql` are unused on `feature/annotation-only`. The `ml` build also installs `crim-ca/gin-model-repo@1.0.1` (from GitHub) and `thelper==0.6.2` (from PyPI). Neither needs cloning unless you modify it.
 - No public source exists for `geoimagenet/geoserver:2.14.0`. Substitute `kartoza/geoserver:2.15.0` via the override file (no kartoza 2.14 tag exists).
 - `crim-ca/geoimagenet` contains only example notebooks for model packaging; the platform doesn't need it.
 - The source repos are cloned as siblings of this repo under `~/DEV/geoimagenet/`. A local `docker-compose.override.yml` can point `build: ../geoimagenet-<name>` at them, so `./geoimagenet-compose.sh build <service>` builds from source. Details are in `../DEPLOYMENT_PLAN.md` §9.
@@ -51,17 +52,15 @@ First run: follow README.md (the verified operations guide: installation order, 
 
 - **Entry point:** `nginx` (the `pavics/canarieapi` image, which bundles nginx and the CANARIE monitoring app on :2000). Routing is in `config/nginx/conf.d/geoimagenet.conf.template`.
   - `/` serves the static frontend from the `dist` volume. The `frontend` container runs a webpack build into that volume at startup (2–3 minutes before the UI responds).
-  - `/graphql` went to `graphql:4000` directly, **not** through Twitcher. Branch `feature/annotation-only` removes it, with `/ml`, along with the ML services.
+  - `/graphql` and `/ml` are removed on `feature/annotation-only`. The `frontend` and `api` environments still define `GRAPHQL_ENDPOINT`, `ML_ENDPOINT` and `GEOIMAGENET_API_BATCH_CREATION_URL`; nothing calls them.
   - `/magpie` goes to `magpie:2001`.
-  - `/api`, `/ml` and `/geoserver` go to `twitcher:8001/ows/proxy/<name>`.
+  - `/api` and `/geoserver` go to `twitcher:8001/ows/proxy/<name>`.
 - **Auth:** Magpie stores users and permissions. Twitcher is the security proxy that asks Magpie (`MagpieAdapter`) before forwarding. A service only gets protected routing if it is registered in `config/magpie/providers.cfg`; permissions are in `permissions.cfg`.
 - **Databases:**
   - One PostGIS container holds the `gis` db (api annotations, migrated by the `migrations` job), the `magpie` db and the `twitcher` db.
-  - MongoDB stores ML job state only.
 - **One-shot jobs:**
   - `migrations` runs alembic on the `gis` db.
   - `geoserver_setup` uses the api image to mirror layers from an upstream GeoServer (`GEOIMAGENET_API_GS_DATASTORE_URL`) into the local one, configured by `config/api/geoserver_config.yaml`.
-- **Shared-path coupling:** `graphql` and `ml` must mount `ml_models` at the same `RAW_MODEL_STORAGE_PATH`. Changing it in only one of them breaks model upload.
 - **Storage:** all named volumes are bind mounts to fixed host paths (`/nas` holds the imagery; `/data/...` holds the databases, ML files and backups). Compose fails at mount time if a directory is missing.
 
 ## Gotchas
@@ -80,9 +79,17 @@ First run: follow README.md (the verified operations guide: installation order, 
 - **Servers use `docker-compose.override.server.yml.example`**: the local example publishes GeoServer on 8600, bypassing Twitcher, and disables Magpie SSL verification.
 - **Restart nginx after restarting any single service**; it keeps the old container IP and returns 502. The wrapper only does it after `up`.
 - **Keep the Twitcher ACL cache disabled** (`cache.regions = acl` in `twitcher.ini.template`): incompatible with route-level permissions in Magpie 1.6.
-- **Imagery path:** the platform's `geoserver` cascades WMS from a separate datastore GeoServer (`geoserver-datastore` locally, see the override example), which serves the GeoTIFFs from `/nas`. `geoserver_setup --setup-datastore` configures both. The datastore's tile cache needs `<fullWMS>true</fullWMS>` in `gwc/geowebcache.xml` (steps in `../DEPLOYMENT_PLAN.md` §10.2).
+- **Imagery path:** the platform's `geoserver` cascades WMS from a separate datastore GeoServer (`geoserver-datastore` locally, see the override example), which serves the GeoTIFFs from `/nas`. `geoserver_setup --setup-datastore` configures both. The datastore's tile cache needs `<fullWMS>true</fullWMS>` in `gwc/geowebcache.xml`. Add it **after** the first `geoserver_setup`: before that, the file has no `<layers/>` line and the README's `sed` changes nothing (it prints the match count; 1 means it worked).
 - **Never use `_` in a GeoServer container name** others call over HTTP: Tomcat answers 400 to such Host headers.
 - **If a kartoza/geoserver 2.15 container answers 404 on `/geoserver` after a restart, recreate it** (`up -d --force-recreate <service>`). It happened once (Tomcat `StackOverflowError` scanning annotations); later restarts of both GeoServers worked.
 - **The wrapper now returns compose's exit status.** It used to end with the nginx loop's status, so failed `run` commands exited 0.
 - **Server-to-server calls must use internal addresses** (`http://magpie:2001`, `http://geoserver:8080`), never `https://${HOST_FQDN}`: with `HOST_FQDN=localhost` that resolves to the calling container itself. The API's `GEOIMAGENET_API_MAGPIE_URL` used the public URL, so it couldn't identify users locally.
 - **GeoServer's admin password is applied on first start only** (kartoza writes a lock file into the data dir). Changing `GEOIMAGENET_API_GS_MIRROR_PASSWORD` later needs the password changed in GeoServer too.
+- **Convert imagery to COG with an internal mask** (`gdal_translate -of COG ... -mask 1`, command in README.md). GeoServer 2.15's RGB and NRG styles ignore the NoData value and draw NoData pixels as opaque black bands. The mask makes them transparent. Keep the original outside the published folder (`/nas/originals/`). After replacing a file, `POST /rest/reset` on both GeoServers and truncate the datastore's cache layer by layer (`<truncateLayer>`; `<truncateAll>` returns 500).
+- **Annotation statuses** (`geoimagenet_api/endpoints/annotations/status.py`):
+  - The owner can move `new` to `released` or `deleted`.
+  - Any validator can move `released` to `validated` or `rejected`.
+  - Nothing goes back to `new`.
+  - The frontend's Edit mode only reaches the user's own `new` annotations. A rejected annotation is fixed by drawing a new one.
+  - `PUT /annotations` only checks ownership, not status: the old `annotation_update_check` trigger function exists but is attached to no trigger.
+  - Validators only see annotations from users they follow.
