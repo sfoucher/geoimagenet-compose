@@ -1,0 +1,21 @@
+# Install as /etc/geoimagenet/rclone.conf (root:root, mode 600). Never commit the real file.
+# Placeholders only.
+
+[swift]
+type = swift
+auth = https://identity.arbutus.alliancecan.ca/v3
+application_credential_id = <application credential id>
+application_credential_secret = <application credential secret>
+region = RegionOne
+# No storage_url needed: rclone takes the endpoint from the Keystone catalog
+# (https://object-arbutus.alliancecan.ca/swift/v1/<project_id>).
+
+[swiftcrypt]
+type = crypt
+remote = swift:geoimagenet-backups
+filename_encryption = standard
+directory_name_encryption = true
+# Output of: rclone obscure (reversible: root on the VM can decrypt the backups) '<long random password>'
+# The plain password lives in the administrator's password manager. Without it no restore is possible.
+password = <obscured crypt password>
+# Optional but recommended, a second password (salt): password2 = <obscured salt password>

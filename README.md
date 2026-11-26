@@ -358,7 +358,58 @@ docker exec postgis_backups /backups.sh
 ls -l /data/postgis_backups/$(date +%Y)/$(date +%B)/
 ```
 
-The dumps stay on the same host. Copy them elsewhere for a real backup. The backup container prints its environment, including the database password, to `docker logs postgis_backups`: treat access to the Docker logs as access to the database.
+The dumps stay on the same host until the off-site copy below runs. The backup container prints its environment, including the database password, to `docker logs postgis_backups`: treat access to the Docker logs as access to the database.
+
+### Off-site copy to Swift (encrypted)
+
+`scripts/offsite-backup.sh` makes a fresh dump, then copies to the encrypted remote `swiftcrypt:` (an rclone `crypt` remote over the Swift container `geoimagenet-backups`):
+
+- the newest dumps of `gis`, `magpie` and `twitcher` (`postgis/<year>/<month>/`);
+- both GeoServer data dirs (`geoserver/<date>/`, `geoserver-datastore/<date>/`), without the tile cache `gwc/` except `gwc/geowebcache.xml` (the datastore's `fullWMS` setting).
+
+It never copies `/nas` (licensed imagery), `env.local` (keep a copy in the administrator's password manager) or volume snapshots. It fails (exit 1, nothing uploaded) if a new dump is empty or less than half the size of the previous one. It uses `copy`, never `sync`, so the credential needs no DELETE. Each object gets `X-Delete-After: 5184000`: Swift deletes it after 60 days. The script runs rclone as the pinned image `rclone/rclone:1.68.2@sha256:74c51b88...` (full digest in the script), with the config and the source directories mounted read-only; nothing is installed on the host. It also deletes local dumps older than 30 days (`kartoza/pg-backup:9.6` has no `REMOVE_BEFORE`).
+
+**Encryption is mandatory.** The dumps hold e-mails and password hashes, and GeoServer's `security/` folder holds the material that decrypts the stored datastore passwords. The crypt password lives only in the administrator's password manager (next to `env.local`). **Without it no restore is possible.**
+
+**Swift credential.** Create it in the Arbutus Horizon UI (or with an unrestricted credential: a credential restricted by access rules cannot create another application credential). Create the private container `geoimagenet-backups`, then an application credential for the `object-store` service. Access rules (Arbutus' object store is Ceph RGW: endpoint `https://object-arbutus.alliancecan.ca/swift/v1/<project_id>`, with no `AUTH_` before the project id; use `*` for the project segment): `PUT`, `GET` and `HEAD` on `/swift/v1/*/geoimagenet-backups/**` **and** `GET` and `HEAD` on `/swift/v1/*/geoimagenet-backups` (the `**` does not match the container path itself, and rclone HEADs and lists the container). No DELETE. Give it an expiry date. Set a calendar reminder one month before it expires, and renew it then (create the new one, update the config, delete the old one).
+
+`obscure` is reversible: root on the VM can decrypt the backups. If you set `password2` (the salt) in the config, it goes in the password manager too. GeoServer's `security/` folder may hold the master password in clear (`masterpw.info`); that is acceptable only because crypt is mandatory. The `logs/` folder is excluded with `gwc/`. If Keystone refuses restricted credentials, use a separate project or Ceph RGW S3 keys instead.
+
+If the platform is down (`postgis_backups` not running), the script prints a message and exits 0: nothing changed since the end-of-period run. A second concurrent run exits 0 too (lock). A dump that is missing, empty or under half the previous size is renamed `*.dmp.rejected` and the script exits 1.
+
+**Not tested yet** (only a local backend was used): the access rules on Arbutus (if the object store does not support them, Keystone fails closed and every call returns 401); the exact endpoint path (`/swift/v1/*/...`) against a real request; that Keystone accepts restricted credentials for RGW (otherwise 401: fall back to a separate project or RGW S3 keys); that `X-Delete-After` is honoured (HEAD an object and look for `X-Delete-At`); the listing rules; the restore drill against Swift; the recovery time (E5). For the drill on the WSL2 copy, prefer a separate GET/HEAD-only credential.
+
+```bash
+sudo install -d -m 700 /etc/geoimagenet
+sudo cp scripts/rclone.conf.example /etc/geoimagenet/rclone.conf   # fill in the placeholders
+sudo chmod 600 /etc/geoimagenet/rclone.conf
+read -rs P; printf %s "$P" | docker run --rm -i rclone/rclone:1.68.2@sha256:74c51b8817e5431bd6d7ed27cb2a50d8ee78d77f6807b72a41ef6f898845942b obscure -   # value for "password"; no password in the shell history
+sudo RCLONE_DOCKER_ARGS='-e RCLONE_DRY_RUN=true' scripts/offsite-backup.sh   # first, a dry run (it still dumps; local retention is skipped)
+sudo scripts/offsite-backup.sh                                      # then for real
+```
+
+**Schedule on the VM** (daily, and a missed run catches up at the next boot). The `.service` file assumes the checkout in `/home/ubuntu/geoimagenet/geoimagenet-compose`; edit the paths if yours differs, then:
+
+```bash
+sudo cp scripts/systemd/geoimagenet-backup.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now geoimagenet-backup.timer
+sudo systemctl start geoimagenet-backup.service && journalctl -u geoimagenet-backup -n 20
+systemctl --failed        # a failed backup shows here
+```
+
+When the platform runs on demand, also run `sudo scripts/offsite-backup.sh` at the end of each period, before `down`.
+
+**Check that the credential cannot delete:** upload a test object, then `rclone deletefile` on it must return 403 (a `--dry-run` proves nothing).
+
+**Restore drill.** `scripts/restore-test.sh` fetches the dumps from `swiftcrypt:`, restores them into a throwaway PostGIS (same pinned image, no network, temporary directory), checks that `annotation` is not empty and that Magpie has the admin user, removes everything and prints the elapsed time. Run it at the start of each on-demand period, and at least once a year, on a scratch host (never on the production data dir):
+
+```bash
+scripts/restore-test.sh                       # admin name read from env.local
+scripts/restore-test.sh -n 1234 -u admin      # expect exactly 1234 annotations
+scripts/restore-test.sh -d /path/to/dumps     # from a local folder instead of Swift
+```
+
+Environment overrides for the two scripts: `RCLONE_CONFIG_FILE`, `REMOTE`, `RCLONE_IMAGE`, `RCLONE_DOCKER_ARGS`. To restore for real, fetch the dumps with `rclone copy` (same image, same config), then follow the procedure below.
 
 **Restore** (for example after the known PostGIS failure, `could not access file "$libdir/postgis-2.5"` in the PostGIS logs, typically after an unnecessary `pull`):
 

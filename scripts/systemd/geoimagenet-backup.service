@@ -1,0 +1,12 @@
+[Unit]
+Description=GeoImageNet off-site backup (dump + encrypted copy to Swift)
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=1h
+# Adjust the path to your checkout of geoimagenet-compose.
+WorkingDirectory=/home/ubuntu/geoimagenet/geoimagenet-compose
+ExecStart=/home/ubuntu/geoimagenet/geoimagenet-compose/scripts/offsite-backup.sh
