@@ -90,7 +90,7 @@ services:
       - GEOIMAGENET_API_SENTRY_URL=${GEOIMAGENET_API_SENTRY_URL}
 
   nginx:
-    image: pavics/canarieapi:0.4.3
+    image: pavics/canarieapi:0.4.3@sha256:1b886f944b9295304b5a81e954c39ee28ca8a6169afc5dd13a851d3f9a88d8f9
     container_name: nginx
     ports:
       - "80:80"
@@ -125,7 +125,7 @@ services:
     restart: always
 
   postgis:
-    image: kartoza/postgis:9.6-2.4
+    image: kartoza/postgis:9.6-2.4@sha256:02366b3cfb2b51ea11878877131b447d49e5ab01742fa4d501b7ef28d4b1f8d9  # digest of the image running on the VM: never re-resolve the tag (re-pushed once, broke postgis-2.5)
     container_name: postgis
     volumes:
       - postgis_data:/var/lib/postgresql
@@ -146,7 +146,7 @@ services:
       test: "exit 0"
 
   postgis_backups:
-    image: kartoza/pg-backup:9.6
+    image: kartoza/pg-backup:9.6@sha256:18b96e37a5b2bb76270de2c1f03dceb7a509fb105227197d9273ae9f1055ccd4
     container_name: postgis_backups
     volumes:
       - postgis_backups:/backups
@@ -201,7 +201,7 @@ services:
       retries: 3
 
   magpie:
-    image: pavics/magpie:1.6.0
+    image: pavics/magpie:1.6.0@sha256:5866aea53b2c6366b6c36a08199d8ba580d9feba5788daf0a2382a09cc50bb00
     container_name: magpie
     # Use docker-compose.override.yml to open ports as required
     # ports:
@@ -226,7 +226,7 @@ services:
     restart: always
 
   twitcher:
-    image: pavics/twitcher:magpie-1.6.0
+    image: pavics/twitcher:magpie-1.6.0@sha256:fdbaa5b67a5fe7598fbe59ceff1c9cf6aeaf8a5fc5c7ab54d1482c17a7635935
     container_name: twitcher
     # Use docker-compose.override.yml to open ports as required
     # ports:
