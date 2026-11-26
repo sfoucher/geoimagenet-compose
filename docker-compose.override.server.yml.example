@@ -16,15 +16,10 @@ services:
   # dev:   image: geoimagenet-api:dev
   # dev: migrations:
   # dev:   image: geoimagenet-api:dev
-  # Frontend: there is no frontend service (nginx mounts the image). Build it by hand:
+  # Frontend: build it by hand, then use it in frontend_files:
   #   docker build -t geoimagenet-frontend:dev ../geoimagenet-frontend
-  # then point the nginx image mount at that tag (compose merges volumes by target):
-  # dev: nginx:
-  # dev:   volumes:
-  # dev:     - type: image
-  # dev:       source: geoimagenet-frontend:dev
-  # dev:       target: /public
-  # dev:       image: { subpath: usr/share/frontend }
+  # dev: frontend_files:
+  # dev:   image: geoimagenet-frontend:dev
 
   # No source exists for the custom geoimagenet/geoserver:2.14.0 image, and Docker Hub has
   # no kartoza/geoserver 2.14 tag. 2.15.0 (2019) is the closest kartoza release.

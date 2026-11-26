@@ -99,6 +99,18 @@ services:
       - GEOIMAGENET_API_POSTGIS_PASSWORD=${POSTGIS_PASSWORD}
       - GEOIMAGENET_API_SENTRY_URL=${GEOIMAGENET_API_SENTRY_URL}
 
+  # One-shot: copies the static frontend from its image into the "public" volume that nginx
+  # serves. An image mount would be simpler, but Docker 29 fails to mount an image referenced
+  # by digest ("file name too long": the mount path encodes the reference), and the digest
+  # pin matters more. Runs on every "up", so an image change is picked up.
+  frontend_files:
+    image: ghcr.io/sfoucher/geoimagenet-frontend:1.8.3-gin.2@sha256:941526d3b2d0c6b1ebc7c3c63dc801ab8a298d390bc06302d2e8efdb4aea90c5
+    container_name: frontend_files
+    command: ["sh", "-c", "rm -rf /out/* && cp -r /usr/share/frontend/. /out/"]
+    volumes:
+      - public:/out
+    restart: "no"
+
   nginx:
     image: pavics/canarieapi:0.4.3@sha256:1b886f944b9295304b5a81e954c39ee28ca8a6169afc5dd13a851d3f9a88d8f9
     container_name: nginx
@@ -109,6 +121,8 @@ services:
     # restart: true restarts nginx when twitcher or magpie is recreated, so it never keeps
     # a stale container address (the old "502 after restarting a service" trap).
     depends_on:
+      frontend_files:
+        condition: service_completed_successfully
       twitcher:
         condition: service_healthy
         restart: true
@@ -128,12 +142,8 @@ services:
       - ./config/canarie-api/res/templates/layout.html:/opt/local/src/CanarieAPI/canarieapi/templates/layout.html
       - ${SSL_CERTIFICATE}:/etc/nginx/cert.pem
       - ${SSL_PRIVATE_KEY}:/etc/nginx/privkey.pem
-      # the static frontend, from the image (it has an empty pdf/ folder for the mount above)
-      - type: image
-        source: ghcr.io/sfoucher/geoimagenet-frontend:1.8.3-gin.2  # digest added after the CI publish (B1)
-        target: /public
-        image:
-          subpath: usr/share/frontend
+      # the static frontend, copied by frontend_files (it has an empty pdf/ folder for the mount above)
+      - public:/public:ro
     environment:
       CANARIE_API_CONFIG_FN: /config/canarie_api_config.py
     healthcheck:
@@ -293,6 +303,7 @@ services:
 
 # TODO: use 'docker-compose.override.yml' to use real mounted volumes
 volumes:
+  public:
   image_data:
     driver: local
     driver_opts:

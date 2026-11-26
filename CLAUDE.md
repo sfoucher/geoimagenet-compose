@@ -11,7 +11,7 @@ Deployment orchestration only for the GeoImageNet platform (CRIM). There is no a
 | Repo | Tag | Image |
 |---|---|---|
 | `sfoucher/geoimagenet-api` (fork of `crim-ca/`), branch `fix/build-2026` | `1.4.2-gin.1` (upstream base 1.4.2) | `ghcr.io/sfoucher/geoimagenet-api`: `api` (also used by `migrations` and `geoserver_setup`) |
-| `sfoucher/geoimagenet-frontend` (fork of `crim-ca/`), branch `fix/build-2026` | `1.8.3-gin.2` (static image, not yet published; gin.1 builds at start; upstream base 1.8.3) | `ghcr.io/sfoucher/geoimagenet-frontend`: static files in the nginx image mount (`/public`) |
+| `sfoucher/geoimagenet-frontend` (fork of `crim-ca/`), branch `fix/build-2026` | `1.8.3-gin.2` (static image; gin.1 builds at start; upstream base 1.8.3) | `ghcr.io/sfoucher/geoimagenet-frontend`: `frontend_files`, copied into the `public` volume nginx serves |
 | `crim-ca/geoimagenet-ml` | `2.2.1` | `ml` |
 | `crim-ca/geoimagenet-graphql` | `0.2.4` | `graphql` |
 
@@ -51,7 +51,7 @@ First run: follow README.md (the verified operations guide: installation order, 
 ## Architecture (big picture)
 
 - **Entry point:** `nginx` (the `pavics/canarieapi` image, which bundles nginx and the CANARIE monitoring app on :2000). Routing is in `config/nginx/conf.d/geoimagenet.conf.template`.
-  - `/` serves the static frontend from an image mount (`type: image`) of `ghcr.io/sfoucher/geoimagenet-frontend` on nginx's `/public`; there is no `frontend` container or `dist` volume. `/config.js` is not in the image: nginx generates it (`return 200` in `geoimagenet.conf.template`, from `HOST_FQDN` and `CONTACT_EMAIL`). `pull` skips image-mount sources: `docker pull <ref>` after bumping it. Local frontend dev: see the override examples.
+  - `/` serves the static frontend from the `public` volume, filled at each `up` by the one-shot `frontend_files` (image `ghcr.io/sfoucher/geoimagenet-frontend`, pinned by digest; nginx waits for it). Not an image mount: Docker 29 fails to mount an image referenced by digest ("file name too long"). `/config.js` is not in the image: nginx generates it (`return 200` in `geoimagenet.conf.template`, from `HOST_FQDN` and `CONTACT_EMAIL`). Local frontend dev: see the override examples.
   - `/graphql` and `/ml` are removed on `feature/annotation-only`. The `api` environment still defines `GRAPHQL_ENDPOINT`, `ML_ENDPOINT` and `GEOIMAGENET_API_BATCH_CREATION_URL`; nothing calls them.
   - `/magpie` goes to `magpie:2001`.
   - `/api` and `/geoserver` go to `twitcher:8001/ows/proxy/<name>`.
