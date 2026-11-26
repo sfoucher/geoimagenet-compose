@@ -143,7 +143,13 @@ services:
     #   - "5432:5432"
     restart: unless-stopped
     healthcheck:
-      test: "exit 0"
+      # A real login over TCP: pg_isready answers before kartoza's first-run setup has
+      # created the user, and postgis_version() also proves the extension.
+      test: ["CMD-SHELL", "PGPASSWORD=$$POSTGRES_PASS psql -h localhost -U $$POSTGRES_USER -d $$POSTGRES_DB -Atc 'select postgis_version()' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   postgis_backups:
     image: kartoza/pg-backup:9.6@sha256:18b96e37a5b2bb76270de2c1f03dceb7a509fb105227197d9273ae9f1055ccd4
