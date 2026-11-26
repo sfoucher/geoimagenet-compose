@@ -74,13 +74,30 @@ services:
       - GEOIMAGENET_API_POSTGIS_PASSWORD=${POSTGIS_PASSWORD}
       - GEOIMAGENET_API_SENTRY_URL=${GEOIMAGENET_API_SENTRY_URL}
 
+  # One-shot: creates the magpie and twitcher databases (only "gis" is created by the image).
+  db_init:
+    image: kartoza/postgis:9.6-2.4@sha256:02366b3cfb2b51ea11878877131b447d49e5ab01742fa4d501b7ef28d4b1f8d9
+    container_name: db_init
+    entrypoint: ["bash", "/db_init.sh"]
+    environment:
+      - PGUSER=${POSTGIS_USER}
+      - PGPASSWORD=${POSTGIS_PASSWORD}
+      - PGDATABASE=${POSTGIS_DB}
+    volumes:
+      - ./config/postgres/db_init.sh:/db_init.sh:ro
+    depends_on:
+      postgis:
+        condition: service_healthy
+    restart: "no"
+
   migrations:
     image: *annotation_api_image
     container_name: migrations
     entrypoint: ["migrate"]
     command: ["upgrade", "head"]
     depends_on:
-      - postgis
+      postgis:
+        condition: service_healthy
     environment:
       - GEOIMAGENET_API_WAIT_FOR_DB_CONNECTION_ON_IMPORT=true
       - GEOIMAGENET_API_POSTGIS_DB=${POSTGIS_DB}

@@ -57,6 +57,9 @@ port=2001
 timeout=30
 workers=4
 threads=4
+# Load the app (and run Magpie's database migration) once in the master, before the
+# workers fork: concurrent workers migrating an empty database corrupt it.
+preload_app = true
 
 # used by magpie/alembic with symlink, %(here)s corresponds to this directory
 [alembic]
