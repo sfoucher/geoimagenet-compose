@@ -1,7 +1,12 @@
 #!/bin/bash
-# Fresh dump, then copy dumps + GeoServer configuration to an encrypted rclone remote (Swift).
+# Fresh dump, then (optionally) copy dumps + GeoServer configuration to an encrypted rclone remote (Swift).
 # Never touches /nas or env.local. Run as root from anywhere. See README "Backups and restore".
+# --dump-only (or DUMP_ONLY=1): stop after the dump and its checks and list the new dumps. This is the
+# mode used by scripts/pull-backup.sh. The rclone/Swift part is currently unused: Arbutus' Ceph RGW
+# answers 401 to every application credential restricted by access rules (see README).
 set -euo pipefail
+[ "${1:-}" = --dump-only ] && DUMP_ONLY=1
+DUMP_ONLY=${DUMP_ONLY:-0}
 
 RCLONE_CONFIG_FILE=${RCLONE_CONFIG_FILE:-/etc/geoimagenet/rclone.conf}
 REMOTE=${REMOTE:-swiftcrypt:}                  # crypt remote (see scripts/rclone.conf.example)
@@ -54,6 +59,10 @@ for db in $DBS; do
     echo "ERROR: dump of $db is $size bytes (previous ${prev[$db]}); renamed to $(basename "$f").rejected, nothing uploaded" >&2; exit 1
   fi
 done
+
+if [ "$DUMP_ONLY" = 1 ]; then
+  echo "New dumps:"; find "$BACKUP_DIR" -name 'geoimagenet_*.dmp' -newer "$MARK" -print; exit 0
+fi
 
 D=$(date +%F)
 UP=(--header-upload "X-Delete-After: $EXPIRE")

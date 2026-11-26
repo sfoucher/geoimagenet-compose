@@ -2,15 +2,15 @@
 # Restore drill: fetch the newest dumps, restore them into a throwaway PostGIS, assert, clean up.
 # Usage: scripts/restore-test.sh [-d LOCAL_DUMP_DIR] [-n EXPECTED_ANNOTATIONS] [-u MAGPIE_ADMIN_USER]
 # The twitcher database is empty in practice (no tables), so only its restore status is checked.
-# Without -d, dumps come from the crypt remote (REMOTE, RCLONE_CONFIG_FILE as in offsite-backup.sh).
+# Without -d, the newest dated folder of the crypt remote made by pull-backup.sh is used (REMOTE, DEST, RCLONE_CONFIG_FILE).
 # Never run it against the production data dir: it only uses a temp dir and a container without network.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-RCLONE_CONFIG_FILE=${RCLONE_CONFIG_FILE:-/etc/geoimagenet/rclone.conf}
-REMOTE=${REMOTE:-swiftcrypt:}
+RCLONE_CONFIG_FILE=${RCLONE_CONFIG_FILE:-$HOME/.config/geoimagenet/rclone.conf}
+REMOTE=${REMOTE:-localcrypt:}
+DEST=${DEST:-$HOME/geoimagenet-backups}
 RCLONE_IMAGE=${RCLONE_IMAGE:-rclone/rclone:1.68.2@sha256:74c51b8817e5431bd6d7ed27cb2a50d8ee78d77f6807b72a41ef6f898845942b}
-RCLONE_DOCKER_ARGS=${RCLONE_DOCKER_ARGS:-}
 PG_IMAGE=${PG_IMAGE:-$(sed -n 's/^ *image: *\(kartoza\/postgis:[^ ]*\).*/\1/p' docker-compose.yml | head -1)}
 LOCAL_DIR=""; EXPECT=""; ADMIN=${MAGPIE_ADMIN_USER:-}
 while getopts d:n:u: o; do case $o in d) LOCAL_DIR=$OPTARG;; n) EXPECT=$OPTARG;; u) ADMIN=$OPTARG;; *) exit 2;; esac; done
@@ -30,9 +30,13 @@ trap 'exit 130' INT TERM
 mkdir "$T/in" "$T/pgdata"
 
 if [ -n "$LOCAL_DIR" ]; then cp -r "$LOCAL_DIR"/. "$T/in/"; else
-  # shellcheck disable=SC2086
-  docker run --rm -v "$RCLONE_CONFIG_FILE":/config/rclone/rconf/rclone.conf:ro -e RCLONE_CONFIG=/config/rclone/rconf/rclone.conf \
-    -v "$T/in":/in $RCLONE_DOCKER_ARGS "$RCLONE_IMAGE" copy "${REMOTE}postgis" /in
+  # DEST is mounted at the same path, so the crypt remote's path in the config is valid in the container
+  rc() { docker run --rm --user "$(id -u):$(id -g)" -v "$RCLONE_CONFIG_FILE":/config/rclone/rconf/rclone.conf:ro \
+    -e RCLONE_CONFIG=/config/rclone/rconf/rclone.conf -v "$DEST":"$DEST" -v "$T/in":/in "$RCLONE_IMAGE" "$@"; }
+  LAST=$(rc lsf --dirs-only "$REMOTE" | sort | tail -1)
+  [ -n "$LAST" ] || { echo "FAIL: no backup folder in $REMOTE" >&2; exit 1; }
+  echo "Using backup folder $LAST"
+  rc copy "${REMOTE}${LAST}dumps" /in
 fi
 
 PW=$(openssl rand -hex 16)   # throwaway, never printed
