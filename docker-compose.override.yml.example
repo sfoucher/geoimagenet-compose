@@ -56,7 +56,15 @@ services:
       # same path as in geoserver_setup: stores are registered as file:/nas/...
       - /nas:/nas:ro
     restart: unless-stopped
+    healthcheck:
+      test: curl --fail -s -o /dev/null http://localhost:8080/geoserver/web/ || exit 1
+      interval: 1m30s
+      timeout: 10s
+      retries: 3
+      start_period: 3m
+      start_interval: 10s
 
   geoserver_setup:
     depends_on:
-      - geoserver-datastore
+      geoserver-datastore:
+        condition: service_healthy

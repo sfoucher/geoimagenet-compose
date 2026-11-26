@@ -1,4 +1,3 @@
-version: "3"
 services:
 
   frontend:
@@ -35,7 +34,15 @@ services:
     volumes:
       - ./config/api/gunicorn.py:/code/gunicorn.py
     depends_on:
-      - migrations
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/api/v1/changelog/')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
     environment:
       - GEOIMAGENET_API_POSTGIS_DB=${POSTGIS_DB}
       - GEOIMAGENET_API_POSTGIS_HOST=postgis
@@ -55,9 +62,14 @@ services:
     image: *annotation_api_image
     container_name: geoserver_setup
     entrypoint: ["geoserver_setup"]
+    # one-shot, run by hand: "./geoimagenet-compose.sh run --rm geoserver_setup ...". The
+    # profile keeps a bare "up" from starting it.
+    profiles: ["setup"]
     depends_on:
-      - postgis
-      - geoserver
+      postgis:
+        condition: service_healthy
+      geoserver:
+        condition: service_healthy
     volumes:
       - image_data:/nas
       - ./config/api/geoserver_config.yaml:/code/geoimagenet_api/geoserver_setup/config.yaml
@@ -98,6 +110,8 @@ services:
     depends_on:
       postgis:
         condition: service_healthy
+      db_init:
+        condition: service_completed_successfully
     environment:
       - GEOIMAGENET_API_WAIT_FOR_DB_CONNECTION_ON_IMPORT=true
       - GEOIMAGENET_API_POSTGIS_DB=${POSTGIS_DB}
@@ -112,12 +126,18 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # Only what nginx proxies to directly; /api and /geoserver go through Twitcher.
+    # restart: true restarts nginx when twitcher or magpie is recreated, so it never keeps
+    # a stale container address (the old "502 after restarting a service" trap).
     depends_on:
-      - api
-      - frontend
-      - geoserver
-      - twitcher
-      - magpie
+      frontend:
+        condition: service_started
+      twitcher:
+        condition: service_healthy
+        restart: true
+      magpie:
+        condition: service_healthy
+        restart: true
     volumes:
       - ./static/pdf:/public/pdf
       - ./config/nginx/conf.d:/etc/nginx/conf.d
@@ -139,6 +159,8 @@ services:
       interval: 1m30s
       timeout: 10s
       retries: 3
+      start_period: 30s
+      start_interval: 5s
     restart: always
 
   postgis:
@@ -175,7 +197,8 @@ services:
       - postgis_backups:/backups
       - ./config/postgres/start_ext.sh:/start_ext.sh
     depends_on:
-      - postgis
+      postgis:
+        condition: service_healthy
     environment:
       - HOSTNAME=${HOST_FQDN}
       - DUMPPREFIX=geoimagenet
@@ -215,13 +238,17 @@ services:
     env_file:
       - config/geoserver/docker-env/geoserver.env
     depends_on:
-      - postgis
+      postgis:
+        condition: service_healthy
     restart: on-failure
     healthcheck:
-      test: curl --fail -s http://localhost:8080/ || exit 1
+      # GeoServer itself, not Tomcat's root page
+      test: curl --fail -s -o /dev/null http://localhost:8080/geoserver/web/ || exit 1
       interval: 1m30s
       timeout: 10s
       retries: 3
+      start_period: 3m
+      start_interval: 10s
 
   magpie:
     image: pavics/magpie:1.6.0@sha256:5866aea53b2c6366b6c36a08199d8ba580d9feba5788daf0a2382a09cc50bb00
@@ -236,9 +263,15 @@ services:
       HOSTNAME: $HOST_FQDN
       FORWARDED_ALLOW_IPS: "*"
     depends_on:
-      - postgis
-    links:
-      - postgis
+      db_init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:2001/version')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
     volumes:
       - ./config/magpie/permissions.cfg:/opt/local/src/magpie/config/permissions.cfg
       - ./config/magpie/providers.cfg:/opt/local/src/magpie/config/providers.cfg
@@ -256,10 +289,17 @@ services:
     #   - "5000:5000"
     #   - "2002:8083"
     depends_on:
-      - postgis
-      - magpie
-    links:
-      - postgis
+      db_init:
+        condition: service_completed_successfully
+      magpie:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8001/')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
     env_file:
       - ./config/postgres/credentials.env
       - ./config/magpie/magpie.env
