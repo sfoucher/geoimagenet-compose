@@ -9,16 +9,22 @@
 services:
   # Local development: build the images from the sibling repos instead of pulling from GHCR.
   # Uncomment the "# dev:" lines (delete the "# dev: " prefix) INSIDE the existing keys (a second `api:` or `geoserver_setup:`
-  # key would be a duplicate), then run `./geoimagenet-compose.sh build api frontend`.
+  # key would be a duplicate), then run `./geoimagenet-compose.sh build api`.
   # YAML anchors don't cross files, so every user of the api image sets it.
   # dev: api:
   # dev:   build: ../geoimagenet-api                # branch fix/build-2026
   # dev:   image: geoimagenet-api:dev
   # dev: migrations:
   # dev:   image: geoimagenet-api:dev
-  # dev: frontend:                                  # until the frontend service is removed (D3)
-  # dev:   build: ../geoimagenet-frontend
-  # dev:   image: geoimagenet-frontend:dev
+  # Frontend: there is no frontend service (nginx mounts the image). Build it by hand:
+  #   docker build -t geoimagenet-frontend:dev ../geoimagenet-frontend
+  # then point the nginx image mount at that tag (compose merges volumes by target):
+  # dev: nginx:
+  # dev:   volumes:
+  # dev:     - type: image
+  # dev:       source: geoimagenet-frontend:dev
+  # dev:       target: /public
+  # dev:       image: { subpath: usr/share/frontend }
 
   # No source exists for the custom geoimagenet/geoserver:2.14.0 image, and Docker Hub has
   # no kartoza/geoserver 2.14 tag. 2.15.0 (2019) is the closest kartoza release.

@@ -18,7 +18,7 @@ This guide covers the **annotation-only** setup (branch `feature/annotation-only
 ## How it fits together
 
 ```
-browser ──HTTPS──► nginx ──► /            static frontend (built by the `frontend` container)
+browser ──HTTPS──► nginx ──► /            static frontend (image mounted into nginx)
                          ├─► /magpie      Magpie: users, groups, permissions
                          └─► /api, /geoserver ──► Twitcher (asks Magpie) ──► api / geoserver
 geoserver ──WMS cascade──► geoserver-datastore ──► GeoTIFFs in /nas
@@ -91,10 +91,13 @@ On WSL2, keep these on the Linux filesystem, not under `/mnt/c`.
 **5. Pull the images.** Name the services; never run a bare `pull` (see [Known traps](#known-traps)):
 
 ```bash
-./geoimagenet-compose.sh pull api frontend
+./geoimagenet-compose.sh pull api
+docker pull ghcr.io/sfoucher/geoimagenet-frontend:1.8.3-gin.2   # the exact reference of the nginx image mount in docker-compose.yml
 ```
 
-Until the GHCR packages are public (A4, see [Versioning](#versioning)), keep the `build:` lines in your override: `pull` fails with `denied` before that. `migrations` and `geoserver_setup` use the `api` image, so this covers them. The other images are pulled at the first `up`. To build from source instead, uncomment the local-development block in the override and run `./geoimagenet-compose.sh build api frontend`.
+The frontend has no service: nginx mounts its image (`type: image`). `pull` does not pull an image-mount source (checked), but `up` pulls it when it is missing locally. It never refreshes a tag already present, so pull the new reference by hand when you bump it.
+
+Until the GHCR packages are public (A4, see [Versioning](#versioning)), keep the `build:` lines in your override: `pull` fails with `denied` before that. `migrations` and `geoserver_setup` use the `api` image, so this covers them. The other images are pulled at the first `up`. To build from source instead, uncomment the local-development block in the override and run `./geoimagenet-compose.sh build api`, then `docker build -t geoimagenet-frontend:dev ../geoimagenet-frontend`.
 
 **6. Start the platform.** One command. Compose orders the start by health:
 - PostGIS is healthy only once a real login works;
@@ -107,7 +110,7 @@ Until the GHCR packages are public (A4, see [Versioning](#versioning)), keep the
 ./geoimagenet-compose.sh up -d --wait
 ```
 
-`--wait` returns once every service is healthy. The `frontend` container builds the web interface into a shared volume, then exits with status 0 (about a minute). `db_init` and `migrations` also exit with 0. `geoserver_setup` belongs to the `setup` profile, so `up` doesn't start it: it runs when imagery is loaded.
+`--wait` returns once every service is healthy. The web interface comes from the frontend image mounted into nginx: it answers within seconds. `db_init` and `migrations` also exit with 0. `geoserver_setup` belongs to the `setup` profile, so `up` doesn't start it: it runs when imagery is loaded.
 
 **7. Check.** Open `https://${HOST_FQDN}` and accept the certificate warning if it is self-signed. Log in as `MAGPIE_ADMIN_USER` with `MAGPIE_ADMIN_PW`. The map stays empty until imagery is loaded.
 
@@ -191,7 +194,7 @@ The same procedure on a dedicated Linux machine (physical or VM) on your network
 | RAM | 16 GB | 32 GB | 8–9 GB peak measured, plus the OS and the page cache for the imagery |
 | System and `/data` | 150 GB SSD | 250 GB SSD | databases, tile cache, Docker images, dumps |
 | `/nas` | 600 GB | 1 TB or more, on RAID 1 | 500 GB of imagery and room to grow |
-| Network | fixed IP | fixed IP and a DNS name | `HOST_FQDN` is compiled into the frontend |
+| Network | fixed IP | fixed IP and a DNS name | `HOST_FQDN` is written into `/config.js` by nginx |
 
 **2. System.** Ubuntu Server 24.04 LTS (or Debian 12). Install Docker Engine and the Compose plugin from Docker's repository. Mount the SSD at `/data` and the imagery disk at `/nas` in `/etc/fstab` (by UUID). Add 4 GB of swap, and limit the Docker logs in `/etc/docker/daemon.json`:
 
@@ -199,7 +202,7 @@ The same procedure on a dedicated Linux machine (physical or VM) on your network
 { "log-driver": "json-file", "log-opts": { "max-size": "50m", "max-file": "3" } }
 ```
 
-**3. Access, host name and certificate.** Users' browsers call the URLs compiled into the frontend, so `HOST_FQDN` must be a name they can resolve, **never `localhost`**:
+**3. Access, host name and certificate.** Users' browsers call the URLs that nginx writes into `/config.js` for the frontend, so `HOST_FQDN` must be a name they can resolve, **never `localhost`**:
 
 | Access | `HOST_FQDN` | Certificate |
 |---|---|---|
@@ -234,7 +237,7 @@ cp env.local.example env.local && chmod 600 env.local
 ```bash
 cd ~/geoimagenet/geoimagenet-compose
 
-# start an annotation period (about a minute: the frontend rebuilds)
+# start an annotation period (about 30 seconds)
 sudo apt update && sudo apt upgrade        # the machine is often off: update at each start
 sudo certbot renew                         # Let's Encrypt only; does nothing if still valid
 ./geoimagenet-compose.sh up -d --wait
@@ -273,7 +276,7 @@ ssh <vm> 'df -h /data /nas'                     # volumes mounted
 ssh <vm> 'cd ~/geoimagenet/geoimagenet-compose && ./geoimagenet-compose.sh up -d'
 ```
 
-- **About 5 minutes of downtime**, plus a minute for the frontend rebuild.
+- **About 5 minutes of downtime**.
 - **If the resize is refused**, delete the instance and create a new one from the same boot volume (`openstack server create --volume <boot-volume> --flavor <new-flavor> ...`), then attach the data volumes and the floating IP again. The IP and the DNS name don't change, so the certificate stays valid.
 - **With more RAM, raise the GeoServer heap** (`MAXIMUM_MEMORY` in `docker-compose.override.yml`), then `up -d --force-recreate geoserver geoserver-datastore`.
 
@@ -405,7 +408,7 @@ The images are built by GitHub Actions in the forks (`sfoucher/geoimagenet-api` 
 1. In the fork, bump the version in the source (`geoimagenet_api/__about__.py`, or `VERSION` and `package.json`) and commit.
 2. Tag `vX.Y.Z-gin.N` and push the tag. `N` counts the fork's releases of the same upstream version `X.Y.Z` (the images are built from `fix/build-2026`, not from CRIM's tag). `v1.4.2-gin.1` publishes `ghcr.io/sfoucher/geoimagenet-api:1.4.2-gin.1` (and `:sha-<short>`). The Action builds, runs a smoke test, then pushes that same image. Wait for it to turn green.
 3. In `docker-compose.yml`, change the tag and, once digests are in use, the digest (`docker buildx imagetools inspect ghcr.io/sfoucher/geoimagenet-api:X.Y.Z`).
-4. Pull only what changed, then recreate it: `./geoimagenet-compose.sh pull api` then `./geoimagenet-compose.sh up -d api` (`migrations` runs again with it). Name the service every time; never run a bare `pull`. While the `frontend` service exists, `pull frontend` then `up -d frontend` works the same way.
+4. Pull only what changed, then recreate it: `./geoimagenet-compose.sh pull api` then `./geoimagenet-compose.sh up -d api` (`migrations` runs again with it). Name the service every time; never run a bare `pull`. The frontend has no service: change the `source:` reference of the nginx image mount in `docker-compose.yml`, run `docker pull <that reference>` (`pull` skips image-mount sources), then `./geoimagenet-compose.sh up -d nginx`. The frontend image holds no URL: `/config.js` is generated by nginx from `HOST_FQDN` and `CONTACT_EMAIL`.
 5. Record the release in this repo: `make VERSION=<x.y.z> bump` (bump2version keeps the version strings in sync).
 
 **Package visibility (once per package, GitHub web UI).** After the first successful run, open each package (Packages, then Package settings): set the visibility to Public and link it to its repository. Until this succeeds, keep the `build:` lines in your override. Check without a login:
