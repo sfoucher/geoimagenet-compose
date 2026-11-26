@@ -1,19 +1,24 @@
-# Local override for hosts without access to docker-registry.crim.ca.
+# Local override. The api and frontend images come from GHCR (see the commented block below for local builds).
 # Copy to docker-compose.override.yml (gitignored) and adjust.
 # See ../DEPLOYMENT_PLAN.md, section 5 (Phase 1) and section 10.
 
 services:
-  # Build the CRIM images from the sibling source repos (../DEPLOYMENT_PLAN.md, section 9).
-  # Compose tags the result with the image name in docker-compose.yml, so `migrations`
-  # and `geoserver_setup`, which reuse the api image, pick up the local build too.
   api:
-    build: ../geoimagenet-api                # branch fix/build-2026
+    # dev: build: ../geoimagenet-api                # branch fix/build-2026
+    # dev: image: geoimagenet-api:dev
     environment:
       # local only: self-signed certificate
       - GEOIMAGENET_API_MAGPIE_VERIFY_SSL=false
 
-  frontend:
-    build: ../geoimagenet-frontend
+  # Local development: build the images from the sibling repos instead of pulling from GHCR.
+  # Uncomment the "# dev:" lines (delete the "# dev: " prefix) INSIDE the existing keys (a second `api:` or `geoserver_setup:`
+  # key would be a duplicate), then run `./geoimagenet-compose.sh build api frontend`.
+  # YAML anchors don't cross files, so every user of the api image sets it.
+  # dev: migrations:
+  # dev:   image: geoimagenet-api:dev
+  # dev: frontend:                                  # until the frontend service is removed (D3)
+  # dev:   build: ../geoimagenet-frontend
+  # dev:   image: geoimagenet-frontend:dev
 
   # No source exists for the custom geoimagenet/geoserver:2.14.0 image, and Docker Hub has
   # no kartoza/geoserver 2.14 tag. 2.15.0 (2019) is the closest kartoza release.
@@ -65,6 +70,7 @@ services:
       start_interval: 10s
 
   geoserver_setup:
+    # dev: image: geoimagenet-api:dev
     depends_on:
       geoserver-datastore:
         condition: service_healthy

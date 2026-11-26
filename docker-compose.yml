@@ -1,7 +1,7 @@
 services:
 
   frontend:
-    image: docker-registry.crim.ca/geoimagenet/frontend:1.8.3
+    image: ghcr.io/sfoucher/geoimagenet-frontend:1.8.3-gin.1  # digest added after the first GHCR publish (B1)
     container_name: frontend
     environment:
       - USING_GEOIMAGENET_COMPOSE=${USING_GEOIMAGENET_COMPOSE:?Please use geoimagenet-compose.sh script instead}
@@ -22,7 +22,7 @@ services:
       - dist:/code/dist
 
   api:
-    image: &annotation_api_image docker-registry.crim.ca/geoimagenet/api:1.4.2
+    image: &annotation_api_image ghcr.io/sfoucher/geoimagenet-api:1.4.2-gin.1  # digest added after the first GHCR publish (B1)
     container_name: api
     command:
       [
@@ -213,6 +213,7 @@ services:
     restart: unless-stopped
 
   geoserver:
+    # no public 2.14 image exists: the override replaces it with kartoza/geoserver:2.15.0
     image: docker-registry.crim.ca/geoimagenet/geoserver:2.14.0
     container_name: geoserver
     # ports:

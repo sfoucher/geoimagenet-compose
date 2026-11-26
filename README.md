@@ -31,7 +31,7 @@ Always go through the wrapper `./geoimagenet-compose.sh`, never `docker compose`
 
 - Docker with the Compose v2 plugin (`docker compose version`).
 - About 16 GB of RAM (each GeoServer is capped at 4 GB and 2 GB) and disk for the imagery.
-- The sibling repos, checked out on their fix branches:
+- Only for local builds (see the commented block in the override): the sibling repos, checked out on their fix branches. The images normally come from GHCR (`ghcr.io/sfoucher/`).
 
   ```
   ~/DEV/geoimagenet/
@@ -44,7 +44,7 @@ Always go through the wrapper `./geoimagenet-compose.sh`, never `docker compose`
 
 Run everything from this repo's folder.
 
-**1. Local override.** It builds the images from the sibling repos, swaps in `kartoza/geoserver:2.15.0` and adds the datastore GeoServer:
+**1. Local override.** It swaps in `kartoza/geoserver:2.15.0` and adds the datastore GeoServer:
 
 ```bash
 cp docker-compose.override.yml.example docker-compose.override.yml
@@ -88,11 +88,13 @@ sudo chown $USER /nas
 
 On WSL2, keep these on the Linux filesystem, not under `/mnt/c`.
 
-**5. Build the images.**
+**5. Pull the images.** Name the services; never run a bare `pull` (see [Known traps](#known-traps)):
 
 ```bash
-./geoimagenet-compose.sh build
+./geoimagenet-compose.sh pull api frontend
 ```
+
+Until the GHCR packages are public (A4, see [Versioning](#versioning)), keep the `build:` lines in your override: `pull` fails with `denied` before that. `migrations` and `geoserver_setup` use the `api` image, so this covers them. The other images are pulled at the first `up`. To build from source instead, uncomment the local-development block in the override and run `./geoimagenet-compose.sh build api frontend`.
 
 **6. Start the platform.** One command. Compose orders the start by health:
 - PostGIS is healthy only once a real login works;
@@ -213,8 +215,6 @@ A self-signed certificate is only for a quick test: every browser warns about it
 ```bash
 mkdir -p ~/geoimagenet && cd ~/geoimagenet
 git clone -b feature/annotation-only https://github.com/sfoucher/geoimagenet-compose
-git clone -b fix/build-2026 https://github.com/sfoucher/geoimagenet-api
-git clone -b fix/build-2026 https://github.com/sfoucher/geoimagenet-frontend
 cd geoimagenet-compose
 cp docker-compose.override.server.yml.example docker-compose.override.yml
 cp env.local.example env.local && chmod 600 env.local
@@ -248,7 +248,7 @@ rsync -a /data/postgis_backups/ <backup-host>:geoimagenet-backups/
 - **Use `down` to stop**, not `stop`, or `magpie`, `twitcher` and `nginx` start again by themselves at the next boot.
 - **Back up at the end of each period** and copy the dumps off the machine. RAID protects against a disk failure, not against a mistake or a lost server. Keep an offline copy of the imagery too.
 - **Let's Encrypt certificates last 90 days** and only renew while the server is on, hence `certbot renew` at each start. A certificate from an internal CA, valid for years, avoids this.
-- **Don't `pull` Docker images.** The api and frontend images are built locally and only change when you rebuild them; pulling PostGIS needlessly can break it (see [Known traps](#known-traps)).
+- **Never run a bare `pull`.** The api and frontend images only change when you bump their tag (see [Versioning](#versioning)); pull them by name. Pulling PostGIS needlessly can break it (see [Known traps](#known-traps)).
 
 **9. Check from another machine on the network:** log in, imagery, annotation, validation, export (as in the step 11 checks of the plan), and that only ports 80 and 443, plus 22 from your machine, answer (`nmap <server>`).
 
@@ -397,3 +397,21 @@ done
 ## Versioning
 
 We use bump2version: `pip install bump2version`. Bump the version with `make VERSION=<target_tag> bump` (`make VERSION=<target_tag> dry bump` to preview).
+
+### Releasing the api and frontend images
+
+The images are built by GitHub Actions in the forks (`sfoucher/geoimagenet-api` and `-frontend`, branch `fix/build-2026`) and published to `ghcr.io/sfoucher/geoimagenet-api` and `-frontend`. A branch push builds without publishing, to catch breakage.
+
+1. In the fork, bump the version in the source (`geoimagenet_api/__about__.py`, or `VERSION` and `package.json`) and commit.
+2. Tag `vX.Y.Z-gin.N` and push the tag. `N` counts the fork's releases of the same upstream version `X.Y.Z` (the images are built from `fix/build-2026`, not from CRIM's tag). `v1.4.2-gin.1` publishes `ghcr.io/sfoucher/geoimagenet-api:1.4.2-gin.1` (and `:sha-<short>`). The Action builds, runs a smoke test, then pushes that same image. Wait for it to turn green.
+3. In `docker-compose.yml`, change the tag and, once digests are in use, the digest (`docker buildx imagetools inspect ghcr.io/sfoucher/geoimagenet-api:X.Y.Z`).
+4. Pull only what changed, then recreate it: `./geoimagenet-compose.sh pull api` then `./geoimagenet-compose.sh up -d api` (`migrations` runs again with it). Name the service every time; never run a bare `pull`. While the `frontend` service exists, `pull frontend` then `up -d frontend` works the same way.
+5. Record the release in this repo: `make VERSION=<x.y.z> bump` (bump2version keeps the version strings in sync).
+
+**Package visibility (once per package, GitHub web UI).** After the first successful run, open each package (Packages, then Package settings): set the visibility to Public and link it to its repository. Until this succeeds, keep the `build:` lines in your override. Check without a login:
+
+```bash
+docker logout ghcr.io; docker pull ghcr.io/sfoucher/geoimagenet-api:1.4.2-gin.1
+```
+
+The images hold no secret and no imagery. The workflows use only the automatic `GITHUB_TOKEN`.

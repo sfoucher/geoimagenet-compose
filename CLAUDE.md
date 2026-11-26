@@ -10,8 +10,8 @@ Deployment orchestration only for the GeoImageNet platform (CRIM). There is no a
 
 | Repo | Tag | Image |
 |---|---|---|
-| `crim-ca/geoimagenet-api` | `1.4.2` | `api` (also used by `migrations` and `geoserver_setup`) |
-| `crim-ca/geoimagenet-frontend` | `1.8.3` | `frontend` |
+| `sfoucher/geoimagenet-api` (fork of `crim-ca/`), branch `fix/build-2026` | `1.4.2-gin.1` (upstream base 1.4.2) | `ghcr.io/sfoucher/geoimagenet-api`: `api` (also used by `migrations` and `geoserver_setup`) |
+| `sfoucher/geoimagenet-frontend` (fork of `crim-ca/`), branch `fix/build-2026` | `1.8.3-gin.1` (upstream base 1.8.3) | `ghcr.io/sfoucher/geoimagenet-frontend`: `frontend` |
 | `crim-ca/geoimagenet-ml` | `2.2.1` | `ml` |
 | `crim-ca/geoimagenet-graphql` | `0.2.4` | `graphql` |
 
@@ -20,7 +20,7 @@ Deployment orchestration only for the GeoImageNet platform (CRIM). There is no a
 - `ml` and `graphql` are unused on `feature/annotation-only`. The `ml` build also installs `crim-ca/gin-model-repo@1.0.1` (from GitHub) and `thelper==0.6.2` (from PyPI). Neither needs cloning unless you modify it.
 - No public source exists for `geoimagenet/geoserver:2.14.0`. Substitute `kartoza/geoserver:2.15.0` via the override file (no kartoza 2.14 tag exists).
 - `crim-ca/geoimagenet` contains only example notebooks for model packaging; the platform doesn't need it.
-- The source repos are cloned as siblings of this repo under `~/DEV/geoimagenet/`. A local `docker-compose.override.yml` can point `build: ../geoimagenet-<name>` at them, so `./geoimagenet-compose.sh build <service>` builds from source. Details are in `../DEPLOYMENT_PLAN.md` §9.
+- The source repos are cloned as siblings of this repo under `~/DEV/geoimagenet/`. For local builds, the override examples hold a commented block with `build: ../geoimagenet-<name>`; then `./geoimagenet-compose.sh build <service>` builds from source. Details are in `../DEPLOYMENT_PLAN.md` §9.
 
 ## Commands
 
@@ -67,7 +67,7 @@ First run: follow README.md (the verified operations guide: installation order, 
 
 - **PostGIS breaks after an unnecessary image pull** (`could not access file "$libdir/postgis-2.5"`): the `9.6-2.4` tag was re-pushed with a different build. Third-party images are now pinned to the digest running on the VM (`tag@sha256:...`); never replace a PostGIS digest with a freshly resolved one. Pull only the images you are updating. The recovery procedure (wipe the data dir, re-init, `pg_restore` from `/data/postgis_backups`) is in README.md.
 - **The wrapper calls the `docker compose` v2 plugin** (changed from the v1 `docker-compose` binary on branch `docs/deployment-plan`). Hosts with only v1 need the plugin installed.
-- **The CRIM images (`docker-registry.crim.ca/...`) are only reachable on the CRIM network.** Elsewhere, build them from the GitHub repos at the pinned tags (see `../DEPLOYMENT_PLAN.md` §5, Phase 1).
+- **`api` and `frontend` come from GHCR** (`ghcr.io/sfoucher/`), built by GitHub Actions in the forks when a `v*` tag is pushed (release routine in README.md, Versioning). A local `docker-compose.override.yml` can build them from the sibling repos instead (commented block in the override examples; it sets `image:` on `api`, `migrations` and `geoserver_setup`). Package visibility must be set to Public once in the GitHub UI.
 - **GeoServer is set to `-Xmx10G`.** Reduce it in the override file on hosts with less than about 24 GB of RAM. With the kartoza image, set `MAXIMUM_MEMORY` and replace `JAVA_OPTS`: its entrypoint appends its own heap flags, built from `MAXIMUM_MEMORY`, after `JAVA_OPTS`.
 - **`docker-compose.override.yml.example`** is the working local override (source builds, kartoza GeoServer, 4 GB heap). Copy it to `docker-compose.override.yml`.
 - **Secrets come only from `env.local`** (on branch `feature/annotation-only`). Generate each with `openssl rand -hex 32`; hex avoids escaping in the Twitcher database URL. The default passwords, the GitHub OAuth secret and the Slack webhook were removed from the tracked files, but they remain in Git history and in CRIM's public repository, so CRIM must revoke the OAuth secret and the webhook.
