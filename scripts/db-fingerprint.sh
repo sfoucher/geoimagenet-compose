@@ -45,10 +45,10 @@ select 'seq '||n.nspname||'.'||c.relname||' '||(xpath('/row/v/text()', query_to_
 SQL
   echo "$SUMS" | while IFS='|' read -r d t e; do
     [ "$d" = "$db" ] || continue
-    # tables absent from a database (an older schema) are skipped, not an error
+    # a table missing from a database (not initialised yet) prints "absent"
     printf 'md5 %s ' "$t"
     psql_ $db <<SQL
-select coalesce((select md5(coalesce(string_agg(x, ',' order by x collate "C"), '')) from (select $e as x from public.$t) s), 'absent') where to_regclass('public.$t') is not null;
+select case when to_regclass('public.$t') is null then 'absent' else (xpath('/row/h/text()', query_to_xml(\$q\$select md5(coalesce(string_agg(x, ',' order by x collate "C"), '')) as h from (select $e as x from public.$t) s\$q\$, false, true, '')))[1]::text end;
 SQL
   done
 done
