@@ -21,24 +21,6 @@ services:
   # dev: frontend_files:
   # dev:   image: geoimagenet-frontend:dev
 
-  # No source exists for the custom geoimagenet/geoserver:2.14.0 image, and Docker Hub has
-  # no kartoza/geoserver 2.14 tag. 2.15.0 (2019) is the closest kartoza release.
-  geoserver:
-    # kartoza/geoserver:2.15.0 (pinned) without gt-complex: workaround for CVE-2024-36401
-    build: ./docker/geoserver
-    image: geoimagenet-geoserver:2.15.0-cve-2024-36401-pgjdbc42229
-    environment:
-      # The kartoza entrypoint rebuilds GEOSERVER_OPTS from INITIAL_MEMORY/MAXIMUM_MEMORY
-      # and appends it to JAVA_OPTS, so the heap is set here, not with -Xmx.
-      # Replacing JAVA_OPTS removes the base file's -Xmx10G.
-      - JAVA_OPTS=-Djava.awt.headless=true
-      - GEOSERVER_OPTS=
-      - INITIAL_MEMORY=1G
-      - MAXIMUM_MEMORY=4G
-      # Applied on first start only (the image writes a lock file in the data dir).
-      # Empty falls back to the image default, "geoserver".
-      - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_MIRROR_PASSWORD}
-
   # Datastore GeoServer: serves the GeoTIFFs in /nas. The platform's `geoserver` (the
   # "mirror") cascades its layers over WMS. CRIM ran this on a separate server; locally
   # it is a second container. Set in env.local:
@@ -46,25 +28,22 @@ services:
   # Then: ./geoimagenet-compose.sh run --rm geoserver_setup --setup-datastore
   # The name must not contain an underscore: Tomcat rejects such Host headers with 400.
   geoserver-datastore:
-    # kartoza/geoserver:2.15.0 (pinned) without gt-complex: workaround for CVE-2024-36401
-    build: ./docker/geoserver
-    image: geoimagenet-geoserver:2.15.0-cve-2024-36401-pgjdbc42229
+    # same official image as `geoserver` (pinned by index digest, see docker-compose.yml)
+    image: docker.osgeo.org/geoserver:3.0.2@sha256:5a372d4988116e8f62c71ae5ff6eb8d433967697670fb1dec15379bf476721fe
     container_name: geoserver-datastore
     environment:
-      - JAVA_OPTS=-Djava.awt.headless=true
-      - GEOSERVER_OPTS=
-      - INITIAL_MEMORY=1G
-      - MAXIMUM_MEMORY=2G
+      - SKIP_DEMO_DATA=true
+      - GEOSERVER_ADMIN_USER=admin
       - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_DATASTORE_PASSWORD}
-    env_file:
-      - config/geoserver/docker-env/geoserver.env
+      - EXTRA_JAVA_OPTS=-Xms512M -Xmx2G -Dorg.geotools.referencing.forceXY=true -Duser.timezone=GMT
     volumes:
-      - /data/geoserver_datastore/data_dir:/opt/geoserver/data_dir
+      # new directory: /data/geoserver_datastore (GeoServer 2.15) stays untouched as the rollback
+      - /data/geoserver_datastore_3/data_dir:/opt/geoserver_data
       # same path as in geoserver_setup: stores are registered as file:/nas/...
       - /nas:/nas:ro
     restart: unless-stopped
     healthcheck:
-      test: curl --fail -s -o /dev/null http://localhost:8080/geoserver/web/ || exit 1
+      test: curl --fail -s -o /dev/null "$$(cat $$CATALINA_HOME/conf/healthcheck_url.txt)" || exit 1
       interval: 1m30s
       timeout: 10s
       retries: 3

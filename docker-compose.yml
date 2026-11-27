@@ -167,40 +167,28 @@ services:
       start_period: 30s
 
   geoserver:
-    # no public 2.14 image exists: the override replaces it with kartoza/geoserver:2.15.0
-    image: docker-registry.crim.ca/geoimagenet/geoserver:2.14.0
+    # Official image (Tomcat 11, Java 21, pgJDBC 42.7 with SCRAM, GeoServer patched for
+    # CVE-2024-36401), pinned by index digest. The "mirror": users reach it only through Twitcher.
+    image: docker.osgeo.org/geoserver:3.0.2@sha256:5a372d4988116e8f62c71ae5ff6eb8d433967697670fb1dec15379bf476721fe
     container_name: geoserver
     # ports:
     #   - "8600:8080"
     environment:
-      - >-
-        JAVA_OPTS=-Djava.awt.headless=true -server -Xms2G -Xmx10G -Xrs -XX:PerfDataSamplingInterval=500
-                  -Dorg.geotools.referencing.forceXY=true -XX:SoftRefLRUPolicyMSPerMB=36000 -XX:+UseParallelGC
-                  -XX:NewRatio=2 -XX:+CMSClassUnloadingEnabled -Dfile.encoding=UTF8 -Duser.timezone=GMT
-                  -Djavax.servlet.request.encoding=UTF-8 -Djavax.servlet.response.encoding=UTF-8
-                  -Duser.timezone=GMT -Dorg.geotools.shapefile.datetime=true
-      - >-
-        GEOSERVER_OPTS=-Djava.awt.headless=true -server -Xms2G -Xmx10G -Xrs -XX:PerfDataSamplingInterval=500
-                  -Dorg.geotools.referencing.forceXY=true -XX:SoftRefLRUPolicyMSPerMB=36000 -XX:+UseParallelGC
-                  -XX:NewRatio=2 -XX:+CMSClassUnloadingEnabled -Dfile.encoding=UTF8 -Duser.timezone=GMT
-                  -Djavax.servlet.request.encoding=UTF-8 -Djavax.servlet.response.encoding=UTF-8
-                  -Duser.timezone=GMT -Dorg.geotools.shapefile.datetime=true
+      - SKIP_DEMO_DATA=true
+      # The image rewrites the admin user and password at EVERY start from these two variables.
+      - GEOSERVER_ADMIN_USER=admin
+      - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_MIRROR_PASSWORD}
+      # Replaces the image's "-Xms256m -Xmx1g". Reduce the heap on hosts with little RAM.
+      - EXTRA_JAVA_OPTS=-Xms1G -Xmx4G -Dorg.geotools.referencing.forceXY=true -Duser.timezone=GMT
     volumes:
-      - geoserver_data:/opt/geoserver/data_dir
-      - ./config/geoserver/styles/annotations.css:/opt/geoserver/data_dir/styles/annotations.css
-      - ./config/geoserver/styles/annotations.xml:/opt/geoserver/data_dir/styles/annotations.xml
-      - ./config/geoserver/web.xml:/usr/local/tomcat/conf/web.xml
-        # This config makes GeoServer completely open and public
-      # - ./config/geoserver/config.xml:/opt/geoserver/data_dir/security/config.xml
-    env_file:
-      - config/geoserver/docker-env/geoserver.env
+      - geoserver3_data:/opt/geoserver_data
     depends_on:
       postgis:
         condition: service_healthy
     restart: on-failure
     healthcheck:
-      # GeoServer itself, not Tomcat's root page
-      test: curl --fail -s -o /dev/null http://localhost:8080/geoserver/web/ || exit 1
+      # the image's own check (a static resource of the web app), with a start_period
+      test: curl --fail -s -o /dev/null "$$(cat $$CATALINA_HOME/conf/healthcheck_url.txt)" || exit 1
       interval: 1m30s
       timeout: 10s
       retries: 3
@@ -280,9 +268,9 @@ volumes:
       type: none
       o: bind
       device: /data/db_gis_17     # the old 9.6 directory, /data/db_gis_data, is never mounted: it is the rollback
-  geoserver_data:
+  geoserver3_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /data/geoserver/data_dir
+      device: /data/geoserver_3/data_dir     # the 2.15 directory, /data/geoserver/data_dir, is never mounted: rollback

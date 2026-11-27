@@ -30,7 +30,7 @@ Always go through the wrapper `./geoimagenet-compose.sh`, never `docker compose`
 ## Prerequisites
 
 - Docker with the Compose v2 plugin (`docker compose version`).
-- About 16 GB of RAM (each GeoServer is capped at 4 GB and 2 GB) and disk for the imagery.
+- About 16 GB of RAM (each GeoServer is capped at 4 GB and 2 GB of heap) and disk for the imagery.
 - Only for local builds (see the commented block in the override): the sibling repos, checked out on their fix branches. The images normally come from GHCR (`ghcr.io/sfoucher/`).
 
   ```
@@ -44,7 +44,7 @@ Always go through the wrapper `./geoimagenet-compose.sh`, never `docker compose`
 
 Run everything from this repo's folder.
 
-**1. Local override.** It swaps in `kartoza/geoserver:2.15.0` and adds the datastore GeoServer:
+**1. Local override.** It adds the datastore GeoServer (both GeoServers are the official `docker.osgeo.org/geoserver:3.0.2`, pinned by digest) and, locally, publishes the platform GeoServer on port 8600:
 
 ```bash
 cp docker-compose.override.yml.example docker-compose.override.yml
@@ -81,8 +81,8 @@ chmod 600 key.pem
 **4. Host directories.** Compose fails at mount time if one is missing:
 
 ```bash
-sudo mkdir -p /nas /data/db_gis_17 /data/geoserver/data_dir \
-  /data/geoserver_datastore/data_dir /data/postgis_backups
+sudo mkdir -p /nas /data/db_gis_17 /data/geoserver_3/data_dir \
+  /data/geoserver_datastore_3/data_dir /data/postgis_backups
 sudo chown $USER /nas
 ```
 
@@ -122,7 +122,7 @@ The platform's `geoserver` does not read the image files. It cascades WMS from t
 - File name matching `Pleiades_<YYYYMMDD>_<BANDS>_50cm_<BITS>bits_AOI_<n>_<City>_<PROV>.tif`. `50cm` is fixed text in the pattern.
 - A footprint shapefile named `..._trace.shp` (with `.shx`, `.dbf`, `.prj`). It is required: without it, `geoserver_setup` fails. Use CRIM's original traces when you have them; they match the 8-bit images even if their names say `16bits`.
 
-Convert to a Cloud-Optimized GeoTIFF (tiles and overviews make GeoServer much faster) with an internal transparency mask, and, if there is no original trace, compute one. The source must declare its border pixels as NoData (`gdalinfo` shows `NoData Value=0`). `-mask 1` turns that NoData into an internal mask: GeoServer 2.15 draws NoData pixels opaque black through the RGB and NRG styles, but it does honour the mask, so the borders become transparent.
+Convert to a Cloud-Optimized GeoTIFF (tiles and overviews make GeoServer much faster) with an internal transparency mask, and, if there is no original trace, compute one. The source must declare its border pixels as NoData (`gdalinfo` shows `NoData Value=0`). `-mask 1` turns that NoData into an internal mask: GeoServer 2.15 drew NoData pixels opaque black through the RGB and NRG styles but honoured the mask; GeoServer 3 treats NoData correctly even without it, and the mask is kept anyway.
 
 ```bash
 G="docker run --rm -u $(id -u):$(id -g) -v /path/to/source:/in:ro -v /nas:/nas ghcr.io/osgeo/gdal:ubuntu-small-3.9.3"
@@ -152,18 +152,29 @@ The imagery is licensed (Airbus). Keep it out of Git and of any public storage.
 
 It must end without a traceback. Each image is then listed as `PLEIADES_RGB:<image>` and `PLEIADES_NRG:<image>` in the map's layer switcher.
 
-**3. Enable "full WMS" on the datastore (once per datastore, after the first publish).** The cascade sends requests that are not aligned to the datastore's tile grid; without this setting they fail with 400. It must come after the first `geoserver_setup`: a fresh datastore only writes the `<layers/>` line this command edits during its first configuration (otherwise the command silently changes nothing; it should print `1`).
+**3. Enable "full WMS" on the datastore (once per datastore, after the first publish).** Still needed on GeoServer 3 (checked: without it the datastore's tile cache answers the cascade with `GridAlignmentMismatchException`, and the map shows nothing). The cascade sends requests that are not aligned to the datastore's tile grid; with this setting they are rendered instead of refused. It must come after the first `geoserver_setup`: a fresh datastore only writes the `<layers/>` line this command edits during its first configuration (otherwise the command silently changes nothing; it should print `1`). The setting survives restarts.
 
 ```bash
-docker exec geoserver-datastore sh -c 'f=/opt/geoserver/data_dir/gwc/geowebcache.xml; grep -q "<fullWMS>" $f || sed -i "s|^  <layers/>$|  <layers/>\n  <fullWMS>true</fullWMS>|" $f; grep -c "<fullWMS>true" $f'
+docker exec geoserver-datastore sh -c 'f=/opt/geoserver_data/gwc/geowebcache.xml; grep -q "<fullWMS>" $f || sed -i "s|^  <layers/>$|  <layers/>\n  <fullWMS>true</fullWMS>|" $f; grep -c "<fullWMS>true" $f'
 ./geoimagenet-compose.sh up -d --force-recreate geoserver-datastore
 ```
 
-**4. Restrict the platform GeoServer's WMS (once per data dir).** Logged-in users may read the whole `geoserver` service, and by default its `GetMap` also returns georeferenced GeoTIFF, KMZ, and images of any size, which amounts to a download of the imagery. The script limits `GetMap` to PNG and JPEG and caps the memory and rendering time of each request, which caps the image at about 2048×2048 px. nginx also answers 404 on `/geoserver/web` and `/geoserver/rest`.
+If the map stays empty after a failed attempt (requests hang instead of failing), the platform GeoServer's connection pool to the datastore is exhausted by the failed requests: `curl -u admin:... -X POST http://localhost:8600/geoserver/rest/reset` on both GeoServers, or recreate `geoserver`.
+
+**4. Restrict the platform GeoServer's WMS (once per data dir).** Logged-in users may read the whole `geoserver` service, and by default its `GetMap` also returns georeferenced GeoTIFF, KMZ, and images of any size, which amounts to a download of the imagery. The script limits `GetMap` to PNG and JPEG, caps the memory and rendering time of each request (which caps the image at about 2048×2048 px), disables dynamic styling (`SLD`, `SLD_BODY`), sets the imagery layers not queryable (no `GetFeatureInfo` pixel values) and disables WCS on both GeoServers. nginx also answers 404 on `/geoserver/web` and `/geoserver/rest`. Rerun it after each `geoserver_setup` that adds images (new layers are queryable by default).
 
 ```bash
 ./scripts/harden-wms.sh          # prints the new settings
 ```
+
+**GeoServer image notes (3.0.2).**
+
+- **Image:** official `docker.osgeo.org/geoserver:3.0.2` (Java 21, Tomcat 11, pgJDBC 42.7 with SCRAM, patched for CVE-2024-36401), pinned by index digest. To update, resolve the new digest with `docker buildx imagetools inspect docker.osgeo.org/geoserver:<tag>`, change it in `docker-compose.yml` and in the override, `pull` the two services by name. Data directories are not upgraded in place: a minor update keeps them, a major one deserves a rehearsal.
+- **Data directories** are `/data/geoserver_3/data_dir` (platform) and `/data/geoserver_datastore_3/data_dir` (datastore), mounted at `/opt/geoserver_data`. Everything in them is rebuilt by `geoserver_setup` (plus steps 3 and 4), so after wiping one, redo steps 2 to 4 (the cached layers refill on demand).
+- **Admin password:** unlike the old kartoza image, the official one rewrites the admin user and password from `GEOSERVER_ADMIN_USER` / `GEOSERVER_ADMIN_PASSWORD` at every start. Changing `GEOIMAGENET_API_GS_*_PASSWORD` in `env.local` and recreating the container is enough. The platform GeoServer's WMS stores (`PLEIADES_RGB`, `PLEIADES_NRG`) keep the datastore password they were created with: after changing the datastore password, delete those two stores (REST, `recurse=true`) and rerun `geoserver_setup`.
+- **Heap:** `EXTRA_JAVA_OPTS` (`-Xms1G -Xmx4G` platform, `-Xmx2G` datastore). It replaces the image's `-Xmx1g`, so keep `-Dorg.geotools.referencing.forceXY=true -Duser.timezone=GMT` in it. Raise the heap on hosts with more RAM, then `up -d --force-recreate geoserver geoserver-datastore`.
+- **Startup:** healthy in about 30 s (Tomcat itself starts in 8 s).
+- **NoData:** GeoServer 3 (JAI-EXT) honours `NoData Value=0` without the COG mask: an unmasked copy of the Sherbrooke scene rendered the same transparent borders. The `-mask 1` step above is kept (harmless, and independent of the server).
 
 ## Daily operation
 
@@ -177,7 +188,6 @@ docker exec geoserver-datastore sh -c 'f=/opt/geoserver/data_dir/gwc/geowebcache
 - **Stop with `down`, not `stop`.** `magpie`, `twitcher` and `nginx` have `restart: always`: after `stop`, Docker starts them again by itself at the next boot, leaving a half-started platform on port 443. `down` removes the containers but none of the data (databases, GeoServer configuration and imagery are in `/data` and `/nas`; `down` without `-v` keeps the volumes), and `up -d` recreates them identically. Verified on 2026-11-25.
 - **After a reboot, run the `up -d --wait` line.** Docker does not restart the platform's `geoserver` on its own (its restart policy is `on-failure`), so the map stays empty until you do.
 - **nginx and a recreated service.** nginx resolves `twitcher` and `magpie` once, at start, so a recreated container with a new address would give 502. Both cases are handled: `./geoimagenet-compose.sh restart twitcher` (or `magpie`) restarts nginx through `depends_on: restart: true`, and the wrapper restarts nginx after every `up`.
-- **If a GeoServer answers 404 on `/geoserver` after a restart, recreate it:** `./geoimagenet-compose.sh up -d --force-recreate geoserver` (or `geoserver-datastore`). It happened once with the kartoza 2.15 image.
 - **Never run a bare `pull`.** Name the images you mean to update. PostGIS is pinned by digest (`postgis/postgis:17-3.5@sha256:...`): never replace the digest by a freshly resolved one, because the PostGIS build under a tag changes (see [Known traps](#known-traps)).
 
 ## Deploying on a local Linux server
@@ -228,7 +238,7 @@ cp env.local.example env.local && chmod 600 env.local
 **7. Data: start fresh or migrate.**
 
 - **Start fresh:** copy the imagery (`rsync -a --info=progress2 <source>/ <server>:/nas/`), then follow [Loading imagery](#loading-imagery).
-- **Migrate an existing deployment**, keeping accounts, annotations and GeoServer configuration: on the old host, run a backup (`sudo ./scripts/pg-dump.sh`; on a host still on PostgreSQL 9.6, `docker exec postgis_backups /backups.sh`) and copy the dumps, `/nas` and `/data/geoserver*/data_dir` to the server with `rsync`. On the server, restore the dumps as in [Backups and restore](#backups-and-restore) instead of running installation step 6 on empty databases. Keep the old GeoServer passwords in `env.local`: GeoServer applies a new admin password on first start only.
+- **Migrate an existing deployment**, keeping accounts, annotations and GeoServer configuration: on the old host, run a backup (`sudo ./scripts/pg-dump.sh`; on a host still on PostgreSQL 9.6, `docker exec postgis_backups /backups.sh`) and copy the dumps, `/nas` and `/data/geoserver_3/data_dir` and `/data/geoserver_datastore_3/data_dir` to the server with `rsync`. On the server, restore the dumps as in [Backups and restore](#backups-and-restore) instead of running installation step 6 on empty databases. The GeoServer admin password comes from `env.local` at every start.
 
 **8. Run it on demand.**
 
@@ -276,7 +286,7 @@ ssh <vm> 'cd ~/geoimagenet/geoimagenet-compose && ./geoimagenet-compose.sh up -d
 
 - **About 5 minutes of downtime**.
 - **If the resize is refused**, delete the instance and create a new one from the same boot volume (`openstack server create --volume <boot-volume> --flavor <new-flavor> ...`), then attach the data volumes and the floating IP again. The IP and the DNS name don't change, so the certificate stays valid.
-- **With more RAM, raise the GeoServer heap** (`MAXIMUM_MEMORY` in `docker-compose.override.yml`), then `up -d --force-recreate geoserver geoserver-datastore`.
+- **With more RAM, raise the GeoServer heap** (`EXTRA_JAVA_OPTS` in `docker-compose.yml` for `geoserver`, in the override for `geoserver-datastore`), then `up -d --force-recreate geoserver geoserver-datastore`.
 
 ## Users and roles
 
@@ -417,10 +427,9 @@ docker volume rm geoimagenet-compose_postgis_data
 sudo install -d /data/db_gis_17
 # the VM first needs these commits (filtered branch + bundle) before it can check them out
 git checkout <the new commit>       # the compose commit with PostgreSQL 17
-# GeoServer image with pgJDBC 42.2.29 (SCRAM): in the real docker-compose.override.yml set the image of
-# geoserver and geoserver-datastore to geoimagenet-geoserver:2.15.0-cve-2024-36401-pgjdbc42229 (or re-copy the example)
-./geoimagenet-compose.sh build geoserver geoserver-datastore
-docker run --rm --entrypoint ls geoimagenet-geoserver:2.15.0-cve-2024-36401-pgjdbc42229 /usr/local/tomcat/webapps/geoserver/WEB-INF/lib | grep -x postgresql-42.2.29.jar
+# GeoServer: this commit already uses the official 3.0.2 image (pgJDBC 42.7, SCRAM); the GeoServer
+# part of the move is its own runbook below (do the PostgreSQL step first, on the commit that still
+# builds the 2.15 image, or do both together).
 ./geoimagenet-compose.sh pull postgis
 ./geoimagenet-compose.sh up -d --wait postgis                     # init script creates gis, magpie, twitcher
 # 4. restore and compare
@@ -452,6 +461,40 @@ git checkout cut-0
 
 Keep `/data/db_gis_data`, `/data/postgis_backups_pre-pg17`, the `kartoza/*` images and the tag `cut-0` until a few periods have passed on 17, then delete the old directory.
 
+### Moving GeoServer from 2.15 to 3.0.2 (cut-over)
+
+For a host that runs the 2.15 GeoServers (`geoimagenet-geoserver:2.15.0-...`, data in `/data/geoserver/data_dir` and `/data/geoserver_datastore/data_dir`). Same steps locally and on the VM. Downtime is the setup time: a few minutes with one image; with about 40 images allow 30 to 60 minutes (the datastore is rebuilt from the files, nothing is copied). The 2.15 directories are never mounted by the new containers: they are the rollback. Needs the api image that contains the GeoServer 3 fixes (`geoserver_setup` fails on 3.0 with an older one: "No endpoint POST /geoserver/rest/namespaces/.").
+
+```bash
+cd ~/geoimagenet/geoimagenet-compose
+git tag cut-2                        # the commit running today (local tag, not pushed)
+# 1. stop the GeoServers (the rest may stay up, or stop everything: ./geoimagenet-compose.sh down)
+./geoimagenet-compose.sh stop geoserver geoserver-datastore nginx
+# 2. new, empty data directories
+sudo install -d /data/geoserver_3/data_dir /data/geoserver_datastore_3/data_dir
+# 3. new commit, new images; re-copy the override example (the GeoServer blocks changed)
+git checkout <the new commit>
+cp docker-compose.override.yml docker-compose.override.yml.bak-pre-gs3      # or the server example
+cp docker-compose.override.server.yml.example docker-compose.override.yml   # servers; locally: docker-compose.override.yml.example
+# put back the local settings of the old override (api image dev lines, ...) then:
+./geoimagenet-compose.sh pull geoserver geoserver-datastore <the api image, by name>
+./geoimagenet-compose.sh up -d --wait geoserver geoserver-datastore      # about 30 s each
+# 4. configure both GeoServers from the imagery
+./geoimagenet-compose.sh run --rm geoserver_setup --setup-datastore
+#    Many images: the mirror may fail layers with "Could not find layer ... in the server capabilities document".
+#    Reset both and rerun until it ends without a traceback:
+#    docker exec geoserver curl -s -u admin:$GEOIMAGENET_API_GS_MIRROR_PASSWORD -X POST http://localhost:8080/geoserver/rest/reset   (same on geoserver-datastore with the datastore password)
+# 5. full WMS on the datastore, then recreate it (README, Loading imagery, step 3), and the restrictions
+docker exec geoserver-datastore sh -c 'f=/opt/geoserver_data/gwc/geowebcache.xml; grep -q "<fullWMS>" $f || sed -i "s|^  <layers/>$|  <layers/>\n  <fullWMS>true</fullWMS>|" $f; grep -c "<fullWMS>true" $f'
+./geoimagenet-compose.sh up -d --force-recreate --wait geoserver-datastore
+./scripts/harden-wms.sh
+./geoimagenet-compose.sh up -d --wait          # restarts nginx too
+```
+
+Checks (the G acceptance block of the plan): map loads RGB and NRG imagery at pixel ratio 1 and 2, borders transparent, the annotation thumbnails render, a new annotation shows up; as a logged-in user GeoTIFF, KMZ, PDF, `SLD_BODY`, `GetFeatureInfo` and an 8192 px PNG are refused (GeoServer answers 200 with a `ServiceException`: check the content type is not `image/*`); anonymous: imagery 401, WFS on `GeoImageNet:annotation` 200, `/geoserver/web/` and `/geoserver/rest/...` 404; the mirror's `GetCapabilities` has the same layer names and keywords as before; a second `geoserver_setup --setup-datastore` ends without errors, then rerun `harden-wms.sh`.
+
+**Rollback:** `./geoimagenet-compose.sh down`, `git checkout cut-2`, restore the old override (the `.bak-pre-gs3` copy), `./geoimagenet-compose.sh build geoserver geoserver-datastore` if the 2.15 image is gone, `up -d --wait`. The old directories were never touched; annotations are in PostgreSQL, so nothing is lost. Delete `/data/geoserver` and `/data/geoserver_datastore` once a few periods have passed.
+
 ## Known traps
 
 | Symptom | Cause and fix |
@@ -463,6 +506,7 @@ Keep `/data/db_gis_data`, `/data/postgis_backups_pre-pg17`, the `kartoza/*` imag
 | A client says `authentication method 10 not supported` | It uses a libpq older than 10 (SCRAM). Checked: the api (libpq 15), Magpie and Twitcher (11) are fine, and the GeoServer image replaces pgJDBC 42.1.1 by 42.2.29. If another client cannot, set `POSTGRES_HOST_AUTH_METHOD=md5` and `command: postgres -c password_encryption=md5` on `postgis` **before the first init** (the password is hashed when the role is created); it applies to every client. |
 | Magpie logs `duplicate key` or `expected to match one row` on first start | It started with several workers. Drop and re-create the `magpie` database, then run the single-worker init. |
 | 502 from nginx after restarting a service | `./geoimagenet-compose.sh restart nginx`. Shouldn't happen with `restart` or `up` (see Daily operation). |
+| GeoServer container healthy but the map is empty, GetMap requests hang | The datastore's `fullWMS` is off (step 3) or its connection pool is exhausted: see step 3. |
 | Every call to a GeoServer container returns 400 | Its name contains `_`; Tomcat rejects such host names. Use `-`. |
 | Map tiles fail with "Content type is required" | "Full WMS" is off on the datastore (Loading imagery, step 2). |
 | Users get "There was a problem connecting to magpie" | The API must reach Magpie at `http://magpie:2001` (`GEOIMAGENET_API_MAGPIE_URL`), never through `https://${HOST_FQDN}`. |
