@@ -11,7 +11,7 @@ Deployment orchestration only for the GeoImageNet platform (CRIM). There is no a
 | Repo | Tag | Image |
 |---|---|---|
 | `sfoucher/geoimagenet-api` (fork of `crim-ca/`), branch `fix/build-2026` | `1.4.2-gin.1` (upstream base 1.4.2) | `ghcr.io/sfoucher/geoimagenet-api`: `api` (also used by `migrations` and `geoserver_setup`) |
-| `sfoucher/geoimagenet-frontend` (fork of `crim-ca/`), branch `fix/build-2026` | `1.8.3-gin.2` (static image; gin.1 builds at start; upstream base 1.8.3) | `ghcr.io/sfoucher/geoimagenet-frontend`: `frontend_files`, copied into the `public` volume nginx serves |
+| `sfoucher/geoimagenet-frontend` (fork of `crim-ca/`), branch `fix/build-2026` | `1.8.3-gin.3` (static image, OSM default base map; gin.1 builds at start; upstream base 1.8.3) | `ghcr.io/sfoucher/geoimagenet-frontend`: `frontend_files`, copied into the `public` volume nginx serves |
 | `crim-ca/geoimagenet-ml` | `2.2.1` | `ml` |
 | `crim-ca/geoimagenet-graphql` | `0.2.4` | `graphql` |
 

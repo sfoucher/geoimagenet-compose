@@ -86,7 +86,7 @@ services:
   # by digest ("file name too long": the mount path encodes the reference), and the digest
   # pin matters more. Runs on every "up", so an image change is picked up.
   frontend_files:
-    image: ghcr.io/sfoucher/geoimagenet-frontend:1.8.3-gin.2@sha256:941526d3b2d0c6b1ebc7c3c63dc801ab8a298d390bc06302d2e8efdb4aea90c5
+    image: ghcr.io/sfoucher/geoimagenet-frontend:1.8.3-gin.3@sha256:bd4cebb6d2cda58f1f6a33cb5716e7e3044cfea68b53a9f72c11e41934d4ece7
     container_name: frontend_files
     command: ["sh", "-c", "rm -rf /out/* && cp -r /usr/share/frontend/. /out/"]
     volumes:
