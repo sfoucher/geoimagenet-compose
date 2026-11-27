@@ -65,22 +65,6 @@ services:
       - GEOIMAGENET_API_POSTGIS_PASSWORD=${POSTGIS_PASSWORD}
       - GEOIMAGENET_API_SENTRY_URL=${GEOIMAGENET_API_SENTRY_URL}
 
-  # One-shot: creates the magpie and twitcher databases (only "gis" is created by the image).
-  db_init:
-    image: kartoza/postgis:9.6-2.4@sha256:02366b3cfb2b51ea11878877131b447d49e5ab01742fa4d501b7ef28d4b1f8d9
-    container_name: db_init
-    entrypoint: ["bash", "/db_init.sh"]
-    environment:
-      - PGUSER=${POSTGIS_USER}
-      - PGPASSWORD=${POSTGIS_PASSWORD}
-      - PGDATABASE=${POSTGIS_DB}
-    volumes:
-      - ./config/postgres/db_init.sh:/db_init.sh:ro
-    depends_on:
-      postgis:
-        condition: service_healthy
-    restart: "no"
-
   migrations:
     image: *annotation_api_image
     container_name: migrations
@@ -89,8 +73,6 @@ services:
     depends_on:
       postgis:
         condition: service_healthy
-      db_init:
-        condition: service_completed_successfully
     environment:
       - GEOIMAGENET_API_WAIT_FOR_DB_CONNECTION_ON_IMPORT=true
       - GEOIMAGENET_API_POSTGIS_DB=${POSTGIS_DB}
@@ -156,51 +138,33 @@ services:
     restart: always
 
   postgis:
-    image: kartoza/postgis:9.6-2.4@sha256:02366b3cfb2b51ea11878877131b447d49e5ab01742fa4d501b7ef28d4b1f8d9  # digest of the image running on the VM: never re-resolve the tag (re-pushed once, broke postgis-2.5)
+    # index digest, tag kept for reading. Never re-resolve the tag: the PostgreSQL major version
+    # never changes under "17-3.5", but its PostGIS build does (see "pin by digest" in README).
+    image: postgis/postgis:17-3.5@sha256:01a6a70e41e6c4467c8f55f6063555ed72db2d6662cd0d571040d42eadaeb6f6
     container_name: postgis
-    volumes:
-      - postgis_data:/var/lib/postgresql
-      - postgis_backups:/backups
     environment:
-      - POSTGRES_DB=${POSTGIS_DB}
+      # not "gis": the image's own PostGIS init runs on $POSTGRES_DB. The init script below creates
+      # gis, magpie and twitcher, with PostGIS in gis only.
+      - POSTGRES_DB=postgres
       - POSTGRES_USER=${POSTGIS_USER}
-      - POSTGRES_PASS=${POSTGIS_PASSWORD}
-      # kartoza/postgis only accepts SSL from Docker networks by default; GeoServer's PostGIS
-      # store (annotation WFS) connects without SSL. Allow password logins from Docker's
-      # private address pool only. The PostGIS port is not published.
-      - ALLOW_IP_RANGE=172.16.0.0/12
+      - POSTGRES_PASSWORD=${POSTGIS_PASSWORD}
+      # the 9.6 cluster used this locale; keeps text ordering (taxonomy names) unchanged
+      - POSTGRES_INITDB_ARGS=--locale=C.UTF-8
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+      - ./config/postgres/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
     # Use docker-compose.override.yml to open ports as required
     # ports:
     #   - "5432:5432"
     restart: unless-stopped
     healthcheck:
-      # A real login over TCP: pg_isready answers before kartoza's first-run setup has
-      # created the user, and postgis_version() also proves the extension.
-      test: ["CMD-SHELL", "PGPASSWORD=$$POSTGRES_PASS psql -h localhost -U $$POSTGRES_USER -d $$POSTGRES_DB -Atc 'select postgis_version()' || exit 1"]
+      # A real TCP login on "gis": the init scripts run on a temporary server bound to the Unix
+      # socket only, so this cannot pass before the databases exist.
+      test: ["CMD-SHELL", "PGPASSWORD=$$POSTGRES_PASSWORD psql -h localhost -U $$POSTGRES_USER -d gis -Atc 'select postgis_version()' || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 30s
-
-  postgis_backups:
-    image: kartoza/pg-backup:9.6@sha256:18b96e37a5b2bb76270de2c1f03dceb7a509fb105227197d9273ae9f1055ccd4
-    container_name: postgis_backups
-    volumes:
-      - postgis_backups:/backups
-      - ./config/postgres/start_ext.sh:/start_ext.sh
-    depends_on:
-      postgis:
-        condition: service_healthy
-    environment:
-      - HOSTNAME=${HOST_FQDN}
-      - DUMPPREFIX=geoimagenet
-      - PGUSER=${POSTGIS_USER}
-      - PGPASSWORD=${POSTGIS_PASSWORD}
-      - PGDATABASE=${POSTGIS_DB}
-      - PGPORT=${POSTGIS_PORT}
-      - PGHOST=postgis
-    command: "/start_ext.sh"
-    restart: unless-stopped
 
   geoserver:
     # no public 2.14 image exists: the override replaces it with kartoza/geoserver:2.15.0
@@ -256,8 +220,8 @@ services:
       HOSTNAME: $HOST_FQDN
       FORWARDED_ALLOW_IPS: "*"
     depends_on:
-      db_init:
-        condition: service_completed_successfully
+      postgis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:2001/version')"]
       interval: 30s
@@ -282,8 +246,8 @@ services:
     #   - "5000:5000"
     #   - "2002:8083"
     depends_on:
-      db_init:
-        condition: service_completed_successfully
+      postgis:
+        condition: service_healthy
       magpie:
         condition: service_healthy
     healthcheck:
@@ -315,13 +279,7 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: /data/db_gis_data
-  postgis_backups:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /data/postgis_backups
+      device: /data/db_gis_17     # the old 9.6 directory, /data/db_gis_data, is never mounted: it is the rollback
   geoserver_data:
     driver: local
     driver_opts:
