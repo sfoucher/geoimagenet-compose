@@ -29,7 +29,7 @@ server {
     location = /config.js {
         default_type application/javascript;
         add_header Cache-Control "no-store";
-        return 200 "window.GEOSERVER_URL='https://${HOST_FQDN}/geoserver';window.GEOIMAGENET_API_URL='https://${HOST_FQDN}/api/v1';window.MAGPIE_ENDPOINT='https://${HOST_FQDN}/magpie';window.GRAPHQL_ENDPOINT='https://${HOST_FQDN}/graphql';window.ML_ENDPOINT='https://${HOST_FQDN}/ml';window.CONTACT_EMAIL='${CONTACT_EMAIL}';window.ANNOTATION_NAMESPACE='GeoImageNet';window.ANNOTATION_LAYER='annotation';window.THELPER_MODEL_UPLOAD_INSTRUCTIONS='https://thelper.readthedocs.io/en/latest/user-guide.html#export-model';window.FRONTEND_JS_SENTRY_DSN='';";
+        return 200 "window.GEOSERVER_URL='https://${HOST_FQDN}/geoserver';window.GEOIMAGENET_API_URL='https://${HOST_FQDN}/api/v1';window.MAGPIE_ENDPOINT='https://${HOST_FQDN}/magpie';window.GRAPHQL_ENDPOINT='https://${HOST_FQDN}/graphql';window.ML_ENDPOINT='https://${HOST_FQDN}/ml';window.CONTACT_EMAIL='${CONTACT_EMAIL}';window.ANNOTATION_NAMESPACE='GeoImageNet';window.ANNOTATION_LAYER='annotation';window.THELPER_MODEL_UPLOAD_INSTRUCTIONS='https://thelper.readthedocs.io/en/latest/user-guide.html#export-model';window.FRONTEND_JS_SENTRY_DSN='';window.MAPBOX_TOKEN='${MAPBOX_TOKEN}';";
     }
 
     location / {
