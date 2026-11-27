@@ -81,7 +81,7 @@ chmod 600 key.pem
 **4. Host directories.** Compose fails at mount time if one is missing:
 
 ```bash
-sudo mkdir -p /nas /data/db_gis_data /data/geoserver/data_dir \
+sudo mkdir -p /nas /data/db_gis_17 /data/geoserver/data_dir \
   /data/geoserver_datastore/data_dir /data/postgis_backups
 sudo chown $USER /nas
 ```
@@ -99,8 +99,7 @@ On WSL2, keep these on the Linux filesystem, not under `/mnt/c`.
 Until the GHCR packages are public (A4, see [Versioning](#versioning)), keep the `build:` lines in your override: `pull` fails with `denied` before that. `migrations` and `geoserver_setup` use the `api` image, so this covers them. The other images are pulled at the first `up`. To build from source instead, uncomment the local-development block in the override and run `./geoimagenet-compose.sh build api`, then `docker build -t geoimagenet-frontend:dev ../geoimagenet-frontend` and set `image: geoimagenet-frontend:dev` on `frontend_files`.
 
 **6. Start the platform.** One command. Compose orders the start by health:
-- PostGIS is healthy only once a real login works;
-- `db_init` creates the `magpie` and `twitcher` databases if they are missing;
+- PostGIS is healthy only once a real login on `gis` works. On an empty data directory its init script (`config/postgres/docker-entrypoint-initdb.d/10-databases.sh`) creates `gis`, `magpie` and `twitcher`, with PostGIS in `gis` only;
 - `migrations` creates the schema and the taxonomies of `gis`;
 - Magpie runs its database migration once before its workers start (`preload_app` in `magpie.ini`);
 - then the API, Twitcher, the GeoServers and nginx start.
@@ -109,7 +108,7 @@ Until the GHCR packages are public (A4, see [Versioning](#versioning)), keep the
 ./geoimagenet-compose.sh up -d --wait
 ```
 
-`--wait` returns once every service is healthy. The web interface is the static frontend copied by `frontend_files` (exits with 0): it answers within seconds. `db_init` and `migrations` also exit with 0. `geoserver_setup` belongs to the `setup` profile, so `up` doesn't start it: it runs when imagery is loaded.
+`--wait` returns once every service is healthy. The web interface is the static frontend copied by `frontend_files` (exits with 0): it answers within seconds. `migrations` also exits with 0. `geoserver_setup` belongs to the `setup` profile, so `up` doesn't start it: it runs when imagery is loaded.
 
 **7. Check.** Open `https://${HOST_FQDN}` and accept the certificate warning if it is self-signed. Log in as `MAGPIE_ADMIN_USER` with `MAGPIE_ADMIN_PW`. The map stays empty until imagery is loaded.
 
@@ -179,7 +178,7 @@ docker exec geoserver-datastore sh -c 'f=/opt/geoserver/data_dir/gwc/geowebcache
 - **After a reboot, run the `up -d --wait` line.** Docker does not restart the platform's `geoserver` on its own (its restart policy is `on-failure`), so the map stays empty until you do.
 - **nginx and a recreated service.** nginx resolves `twitcher` and `magpie` once, at start, so a recreated container with a new address would give 502. Both cases are handled: `./geoimagenet-compose.sh restart twitcher` (or `magpie`) restarts nginx through `depends_on: restart: true`, and the wrapper restarts nginx after every `up`.
 - **If a GeoServer answers 404 on `/geoserver` after a restart, recreate it:** `./geoimagenet-compose.sh up -d --force-recreate geoserver` (or `geoserver-datastore`). It happened once with the kartoza 2.15 image.
-- **Never run a bare `pull`.** Pulling the PostGIS image unnecessarily can break it (see [Backups and restore](#backups-and-restore)). Name the images you mean to update.
+- **Never run a bare `pull`.** Name the images you mean to update. PostGIS is pinned by digest (`postgis/postgis:17-3.5@sha256:...`): never replace the digest by a freshly resolved one, because the PostGIS build under a tag changes (see [Known traps](#known-traps)).
 
 ## Deploying on a local Linux server
 
@@ -229,7 +228,7 @@ cp env.local.example env.local && chmod 600 env.local
 **7. Data: start fresh or migrate.**
 
 - **Start fresh:** copy the imagery (`rsync -a --info=progress2 <source>/ <server>:/nas/`), then follow [Loading imagery](#loading-imagery).
-- **Migrate an existing deployment**, keeping accounts, annotations and GeoServer configuration: on the old host, run a backup (`docker exec postgis_backups /backups.sh`) and copy the dumps, `/nas` and `/data/geoserver*/data_dir` to the server with `rsync`. On the server, restore the dumps as in [Backups and restore](#backups-and-restore) instead of running installation step 6 on empty databases. Keep the old GeoServer passwords in `env.local`: GeoServer applies a new admin password on first start only.
+- **Migrate an existing deployment**, keeping accounts, annotations and GeoServer configuration: on the old host, run a backup (`./scripts/pg-dump.sh`; on a host still on PostgreSQL 9.6, `docker exec postgis_backups /backups.sh`) and copy the dumps, `/nas` and `/data/geoserver*/data_dir` to the server with `rsync`. On the server, restore the dumps as in [Backups and restore](#backups-and-restore) instead of running installation step 6 on empty databases. Keep the old GeoServer passwords in `env.local`: GeoServer applies a new admin password on first start only.
 
 **8. Run it on demand.**
 
@@ -242,7 +241,7 @@ sudo certbot renew                         # Let's Encrypt only; does nothing if
 ./geoimagenet-compose.sh up -d --wait
 
 # end of the period
-docker exec postgis_backups /backups.sh    # the 23:00 automatic dump only runs if the server is up
+./scripts/pg-dump.sh                       # nothing dumps automatically: the server is often off
 rsync -a /data/postgis_backups/ <backup-host>:geoimagenet-backups/
 ./geoimagenet-compose.sh down
 ```
@@ -250,7 +249,7 @@ rsync -a /data/postgis_backups/ <backup-host>:geoimagenet-backups/
 - **Use `down` to stop**, not `stop`, or `magpie`, `twitcher` and `nginx` start again by themselves at the next boot.
 - **Back up at the end of each period** and copy the dumps off the machine. RAID protects against a disk failure, not against a mistake or a lost server. Keep an offline copy of the imagery too.
 - **Let's Encrypt certificates last 90 days** and only renew while the server is on, hence `certbot renew` at each start. A certificate from an internal CA, valid for years, avoids this.
-- **Never run a bare `pull`.** The api and frontend images only change when you bump their tag (see [Versioning](#versioning)); pull them by name. Pulling PostGIS needlessly can break it (see [Known traps](#known-traps)).
+- **Never run a bare `pull`.** The api and frontend images only change when you bump their tag (see [Versioning](#versioning)); pull them by name. The PostGIS image is pinned by digest and must stay so (see [Known traps](#known-traps)).
 
 **9. Check from another machine on the network:** log in, imagery, annotation, validation, export (as in the step 11 checks of the plan), and that only ports 80 and 443, plus 22 from your machine, answer (`nmap <server>`).
 
@@ -351,44 +350,98 @@ rm /tmp/mc
 
 ## Backups and restore
 
-`postgis_backups` dumps every database (`gis`, `magpie`, `twitcher`) each day at 23:00 UTC into `/data/postgis_backups/<year>/<month>/`. To run one now:
+`scripts/pg-dump.sh` dumps the three databases (`gis`, `magpie`, `twitcher`) with `pg_dump` run inside the `postgis` container, into `/data/postgis_backups/<year>/<Month>/geoimagenet_<db>.<dd-Month-YYYY>.dmp`. Each dump is written to a `.tmp` file, checked (not empty, not less than half of the previous one) and renamed, so a failed run never leaves a bad `.dmp`. Dumps older than 30 days are deleted. There is no backup container and no scheduler: the platform runs on demand, so dump at the end of each period (see [Daily operation](#daily-operation)):
 
 ```bash
-docker exec postgis_backups /backups.sh
+./scripts/pg-dump.sh
 ls -l /data/postgis_backups/$(date +%Y)/$(date +%B)/
 ```
 
-The dumps stay on the same host. Copy them elsewhere for a real backup. The backup container prints its environment, including the database password, to `docker logs postgis_backups`: treat access to the Docker logs as access to the database.
+On a host that stays up, a host cron line does the same each night (`env.local` must be readable by that user):
 
-**Restore** (for example after the known PostGIS failure, `could not access file "$libdir/postgis-2.5"` in the PostGIS logs, typically after an unnecessary `pull`):
+```
+0 23 * * *  cd /home/<user>/geoimagenet/geoimagenet-compose && ./scripts/pg-dump.sh >> /var/log/geoimagenet-dump.log 2>&1
+```
+
+The dumps stay on the same host. Copy them elsewhere (`rsync -a /data/postgis_backups/ <backup-host>:geoimagenet-backups/`) for a real backup. Roles are not dumped: the container environment recreates the role on an empty cluster.
+
+**Restore** into an empty cluster (for example after losing the data directory, or to move to a new host):
 
 ```bash
 ./geoimagenet-compose.sh down
-sudo rm -rf /data/db_gis_data/*
-docker rmi kartoza/postgis:9.6-2.4
-
-# re-create PostGIS, the magpie and twitcher databases and the gis schema, without starting
-# Magpie (it would migrate its empty database before the restore)
-./geoimagenet-compose.sh up -d --wait postgis db_init migrations
-
-set -a; . ./env.local; set +a
-D=/data/postgis_backups/2026/November           # pick the dump folder
-for db in gis magpie twitcher; do
-  f=$(ls -t $D/geoimagenet_$db.*.dmp | head -1)   # newest dump of that database
-  docker exec -i -e PGPASSWORD="$POSTGIS_PASSWORD" postgis \
-    pg_restore -h localhost -U "$POSTGIS_USER" -d $db -c < "$f"
-done
+sudo rm -rf /data/db_gis_17/*        # empty data directory: the init script runs again
+# starts PostGIS only. Do not start Magpie yet: it would migrate its empty database before the restore.
+./geoimagenet-compose.sh up -d --wait postgis
+./scripts/pg-restore.sh /data/postgis_backups/2026/November      # pick the dump folder
+./geoimagenet-compose.sh run --rm migrations current              # must show (head)
 ./geoimagenet-compose.sh up -d --wait
 ```
 
-`pg_restore` may report that it cannot drop the PostGIS extension; that error is harmless.
+`pg-restore.sh <dump-dir> [db...]` takes the newest dump of each database in the folder (`ls -t`), restores it with `pg_restore` as the superuser inside the container, prints the errors and **fails on anything outside a short allow-list**: the `public` schema and the `postgis` and `plpgsql` extensions already existing, `spatial_ref_sys` duplicate rows, and the legacy PostGIS 1.x functions (`asbinary`, `astext`, `setsrid`, ...) that a 9.6 dump carries and that nothing here calls. A 9.6 dump restores into 17, never the reverse. To check a restore, run `./scripts/db-fingerprint.sh > before.txt` (read-only: counts, sequence values and checksums, never data) before the move and diff it with the output after.
+
+**Query the database** by hand (the `psql_gis` shell helper):
+
+```bash
+psql_gis() { set -a; . ./env.local; set +a; docker exec -it -e PGPASSWORD="$POSTGIS_PASSWORD" postgis psql -h localhost -U "$POSTGIS_USER" -d gis "$@"; }
+psql_gis -c '\dx'      # plpgsql and postgis, plus fuzzystrmatch once the migrations ran
+```
+
+### Moving from PostgreSQL 9.6 to 17 (cut-over)
+
+For a host that runs the old stack (`kartoza/postgis:9.6-2.4`, data in `/data/db_gis_data`). Same steps locally and on the VM. Allow about 15 minutes of downtime: the databases are small, the rest is checks. The old data directory is never touched again, so it is the rollback.
+
+```bash
+cd ~/geoimagenet/geoimagenet-compose
+git tag cut-0                       # the commit running today: the rollback point (local tag, not pushed)
+df -h /data                         # space for a second copy of the databases
+# 1. stop the writers (PostGIS stays up)
+./geoimagenet-compose.sh stop api magpie twitcher geoserver geoserver-datastore nginx
+# 2. the final state of the old stack: fingerprint, then the final dump, then the 9.6 copy
+./scripts/db-fingerprint.sh > /tmp/fingerprint-96.txt
+docker exec postgis_backups /backups.sh
+sudo install -d /data/postgis_backups_pre-pg17                   # outside the 30-day cleanup of pg-dump.sh
+for db in gis magpie twitcher; do
+  sudo cp -p "$(ls -t /data/postgis_backups/*/*/geoimagenet_$db.*.dmp | head -1)" /data/postgis_backups_pre-pg17/
+done
+ls -l /data/postgis_backups_pre-pg17/
+# 3. swap the stack
+./geoimagenet-compose.sh down
+sudo install -d /data/db_gis_17
+git checkout <the new commit>       # the compose commit with PostgreSQL 17
+./geoimagenet-compose.sh build geoserver geoserver-datastore      # GeoServer image with pgJDBC 42.2.29 (SCRAM); skip if the override does not build it
+./geoimagenet-compose.sh pull postgis
+./geoimagenet-compose.sh up -d --wait postgis                     # init script creates gis, magpie, twitcher
+# 4. restore and compare
+./scripts/pg-restore.sh /data/postgis_backups_pre-pg17              # the final 9.6 dumps
+./scripts/db-fingerprint.sh | diff /tmp/fingerprint-96.txt - && echo IDENTICAL
+./geoimagenet-compose.sh run --rm migrations current              # must show (head)
+# 5. start everything and check
+./geoimagenet-compose.sh up -d --wait
+./scripts/pg-dump.sh                # first dump on 17
+ls /data/db_gis_data >/dev/null && echo "old data directory intact"
+```
+
+Checks: the web interface loads, you can log in as `MAGPIE_ADMIN_USER`, an annotation can be created and deleted, the imagery renders. `docker exec postgis psql -U $POSTGIS_USER -d gis -Atc 'select version()'` (with `PGPASSWORD`) shows 17.x.
+
+**Rollback** (data written since step 5 is lost, so decide before users come back):
+
+```bash
+./geoimagenet-compose.sh down
+git checkout cut-0
+./geoimagenet-compose.sh up -d --wait
+```
+
+Keep `/data/db_gis_data`, `/data/postgis_backups_pre-pg17`, the `kartoza/*` images and the tag `cut-0` until a few periods have passed on 17, then delete the old directory.
 
 ## Known traps
 
 | Symptom | Cause and fix |
 |---|---|
 | Wrapper error "Required variable X is not set" | Fill in `X` in `env.local`. |
-| `password authentication failed` right after starting PostGIS for the first time | PostGIS was still in its first-run setup. Its healthcheck waits for a real login; start with `up -d --wait`. |
+| `password authentication failed` right after starting PostGIS for the first time | PostGIS was still in its first-run setup. Its healthcheck waits for a real login on `gis`; start with `up -d --wait`. |
+| After a PostGIS image change, `could not access file "$libdir/postgis-..."` | The image is pinned by digest because a tag can be re-pushed with another PostGIS build. Keep the `@sha256:` pin, pull only the images you update, and restore from a dump (Backups and restore) if it happened. |
+| PostGIS password or user changed in `env.local`, login still fails | The official image applies `POSTGRES_USER` and `POSTGRES_PASSWORD` once, when the data directory is empty. Change the role's password in PostgreSQL (`ALTER ROLE`) or restore into a new directory. |
+| A client says `authentication method 10 not supported` | It uses a libpq older than 10 (SCRAM). Checked: the api (libpq 15), Magpie and Twitcher (11) are fine, and the GeoServer image replaces pgJDBC 42.1.1 by 42.2.29. If another client cannot, set `POSTGRES_HOST_AUTH_METHOD=md5` and `command: postgres -c password_encryption=md5` on `postgis` **before the first init** (the password is hashed when the role is created); it applies to every client. |
 | Magpie logs `duplicate key` or `expected to match one row` on first start | It started with several workers. Drop and re-create the `magpie` database, then run the single-worker init. |
 | 502 from nginx after restarting a service | `./geoimagenet-compose.sh restart nginx`. Shouldn't happen with `restart` or `up` (see Daily operation). |
 | Every call to a GeoServer container returns 400 | Its name contains `_`; Tomcat rejects such host names. Use `-`. |
