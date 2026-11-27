@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # kartoza/geoserver 2.15.0 (no longer patched), with three fixes. Remove this image when step 2
 # moves to a maintained GeoServer.
 FROM kartoza/geoserver:2.15.0@sha256:6e04cd515da846d0791ccaad0c69cec9a450424fee90481ab367d9147e0a58dc
@@ -15,6 +16,6 @@ RUN rm $LIB/gt-complex-*.jar $LIB/gs-csw-*.jar $LIB/gs-web-csw-*.jar $LIB/sqlite
 # 3. PostgreSQL 17 stores passwords as SCRAM-SHA-256. The shipped pgJDBC 42.1.1 fails with "The
 #    authentication type 10 is not supported" (SCRAM needs 42.2.0 or later), so the annotation
 #    PostGIS store could not connect. 42.2.29 is the last 42.2 release: same API, Java 8.
-ADD --checksum=sha256:4c5d4528527354b2e594f458f0807e710f4d5683491179d2580f3d5ae5e7477c \
+ADD --chmod=644 --checksum=sha256:4c5d4528527354b2e594f458f0807e710f4d5683491179d2580f3d5ae5e7477c \
     https://repo1.maven.org/maven2/org/postgresql/postgresql/42.2.29/postgresql-42.2.29.jar /tmp/
 RUN rm $LIB/postgresql-42.1.1.jar && mv /tmp/postgresql-42.2.29.jar $LIB/

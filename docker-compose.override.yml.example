@@ -26,7 +26,7 @@ services:
   geoserver:
     # kartoza/geoserver:2.15.0 (pinned) without gt-complex: workaround for CVE-2024-36401
     build: ./docker/geoserver
-    image: geoimagenet-geoserver:2.15.0-cve-2024-36401
+    image: geoimagenet-geoserver:2.15.0-cve-2024-36401-pgjdbc42229
     environment:
       # The kartoza entrypoint rebuilds GEOSERVER_OPTS from INITIAL_MEMORY/MAXIMUM_MEMORY
       # and appends it to JAVA_OPTS, so the heap is set here, not with -Xmx.
@@ -51,7 +51,7 @@ services:
   geoserver-datastore:
     # kartoza/geoserver:2.15.0 (pinned) without gt-complex: workaround for CVE-2024-36401
     build: ./docker/geoserver
-    image: geoimagenet-geoserver:2.15.0-cve-2024-36401
+    image: geoimagenet-geoserver:2.15.0-cve-2024-36401-pgjdbc42229
     container_name: geoserver-datastore
     environment:
       - JAVA_OPTS=-Djava.awt.headless=true

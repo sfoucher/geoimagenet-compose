@@ -32,6 +32,8 @@ cd $(dirname $(readlink -f $0 || realpath $0))
 # we don't use usual .env filename, because docker-compose uses it
 [[ -f env.local ]] && source env.local
 
+[[ ${POSTGIS_DB:-} == gis ]] || { echo "POSTGIS_DB must be gis (hardcoded in the PostGIS init script and helpers)" >&2; exit 1; }
+
 for i in ${VARS}
 do
   v="${i#$}"

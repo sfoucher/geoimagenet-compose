@@ -143,8 +143,8 @@ services:
     image: postgis/postgis:17-3.5@sha256:01a6a70e41e6c4467c8f55f6063555ed72db2d6662cd0d571040d42eadaeb6f6
     container_name: postgis
     environment:
-      # not "gis": the image's own PostGIS init runs on $POSTGRES_DB. The init script below creates
-      # gis, magpie and twitcher, with PostGIS in gis only.
+      # The bind-mounted initdb.d below REPLACES the image's own 10_postgis.sh (it never runs); the
+      # script there creates gis, magpie and twitcher, with PostGIS in gis only. "postgres" is harmless.
       - POSTGRES_DB=postgres
       - POSTGRES_USER=${POSTGIS_USER}
       - POSTGRES_PASSWORD=${POSTGIS_PASSWORD}

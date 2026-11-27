@@ -12,7 +12,7 @@ set -euo pipefail
 C=${1:-postgis}
 if [ -z "${PG_PASSWORD:-}" ]; then set -a; . "$(dirname "$0")/../env.local"; set +a; fi
 U=${PG_USER:-$POSTGIS_USER}; P=${PG_PASSWORD:-$POSTGIS_PASSWORD}; H=${PG_HOST:-localhost}
-psql_() { docker exec -i -e PGPASSWORD="$P" -e PGOPTIONS='-c TimeZone=UTC' "$C" psql -h "$H" -U "$U" -d "$1" -X -A -t -q -v ON_ERROR_STOP=1; }
+psql_() { PGPASSWORD="$P" docker exec -i -e PGPASSWORD -e PGOPTIONS='-c TimeZone=UTC' "$C" psql -h "$H" -U "$U" -d "$1" -X -A -t -q -v ON_ERROR_STOP=1; }
 
 # db|table|row expression (key columns first; geometry as hex EWKB)
 SUMS='gis|annotation|concat_ws(chr(124),id,annotator_id,taxonomy_class_id,status,review_requested,name,image_id,updated_at,encode(ST_AsEWKB(geometry),chr(104)||chr(101)||chr(120)))

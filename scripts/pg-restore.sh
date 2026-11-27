@@ -13,7 +13,8 @@ if [ -z "${PG_PASSWORD:-}" ]; then set -a; . "$(dirname "$0")/../env.local"; set
 U=${PG_USER:-$POSTGIS_USER}; P=${PG_PASSWORD:-$POSTGIS_PASSWORD}; C=${PG_CONTAINER:-postgis}
 # Expected on a 9.6 / PostGIS 2.4 dump, nothing else:
 # - the schema public and the extensions postgis and plpgsql already exist in the new cluster;
-# - spatial_ref_sys keeps the rows of PostGIS 3.5 (a COPY of old rows would fail on duplicate keys);
+# - spatial_ref_sys keeps the rows of PostGIS 3.5 (a COPY of old rows would fail on duplicate keys;
+#   this would also drop custom SRIDs, but this dump has none);
 # - the 9.6 dumps carry ~12 legacy PostGIS aliases created outside the extension (asbinary, astext,
 #   setsrid, ...), which point at the 2.4 library. They are PostGIS 1.x names that nothing here calls
 #   (the app and GeoServer use ST_*); the eight written in C fail, the rest are restored. Any other
@@ -26,7 +27,7 @@ for db in $dbs; do
   [ -n "$f" ] || { echo "no dump of $db in $dir" >&2; exit 1; }
   echo "== $db <- $f"
   t=$(date +%s); log=$(mktemp); rc=0
-  docker exec -i -e PGPASSWORD="$P" "$C" pg_restore -h localhost -U "$U" -d "$db" --no-owner --role="$U" < "$f" 2> "$log" || rc=$?
+  PGPASSWORD="$P" docker exec -i -e PGPASSWORD "$C" pg_restore -h localhost -U "$U" -d "$db" --no-owner --role="$U" < "$f" 2> "$log" || rc=$?
   errs=$(grep -E '^pg_restore: error|ERROR:' "$log" || true)
   bad=$(printf '%s\n' "$errs" | grep -v '^$' | grep -Ev "$ALLOW" || true)
   # a "$libdir" failure is only allowed for the legacy functions

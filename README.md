@@ -228,7 +228,7 @@ cp env.local.example env.local && chmod 600 env.local
 **7. Data: start fresh or migrate.**
 
 - **Start fresh:** copy the imagery (`rsync -a --info=progress2 <source>/ <server>:/nas/`), then follow [Loading imagery](#loading-imagery).
-- **Migrate an existing deployment**, keeping accounts, annotations and GeoServer configuration: on the old host, run a backup (`./scripts/pg-dump.sh`; on a host still on PostgreSQL 9.6, `docker exec postgis_backups /backups.sh`) and copy the dumps, `/nas` and `/data/geoserver*/data_dir` to the server with `rsync`. On the server, restore the dumps as in [Backups and restore](#backups-and-restore) instead of running installation step 6 on empty databases. Keep the old GeoServer passwords in `env.local`: GeoServer applies a new admin password on first start only.
+- **Migrate an existing deployment**, keeping accounts, annotations and GeoServer configuration: on the old host, run a backup (`sudo ./scripts/pg-dump.sh`; on a host still on PostgreSQL 9.6, `docker exec postgis_backups /backups.sh`) and copy the dumps, `/nas` and `/data/geoserver*/data_dir` to the server with `rsync`. On the server, restore the dumps as in [Backups and restore](#backups-and-restore) instead of running installation step 6 on empty databases. Keep the old GeoServer passwords in `env.local`: GeoServer applies a new admin password on first start only.
 
 **8. Run it on demand.**
 
@@ -241,7 +241,7 @@ sudo certbot renew                         # Let's Encrypt only; does nothing if
 ./geoimagenet-compose.sh up -d --wait
 
 # end of the period
-./scripts/pg-dump.sh                       # nothing dumps automatically: the server is often off
+sudo ./scripts/pg-dump.sh                  # nothing dumps automatically: the server is often off
 rsync -a /data/postgis_backups/ <backup-host>:geoimagenet-backups/
 ./geoimagenet-compose.sh down
 ```
@@ -350,14 +350,16 @@ rm /tmp/mc
 
 ## Backups and restore
 
-`scripts/pg-dump.sh` dumps the three databases (`gis`, `magpie`, `twitcher`) with `pg_dump` run inside the `postgis` container, into `/data/postgis_backups/<year>/<Month>/geoimagenet_<db>.<dd-Month-YYYY>.dmp`. Each dump is written to a `.tmp` file, checked (not empty, not less than half of the previous one) and renamed, so a failed run never leaves a bad `.dmp`. Dumps older than 30 days are deleted. There is no backup container and no scheduler: the platform runs on demand, so dump at the end of each period (see [Daily operation](#daily-operation)):
+`scripts/pg-dump.sh` dumps the three databases (`gis`, `magpie`, `twitcher`) with `pg_dump` run inside the `postgis` container, into `/data/postgis_backups/<year>/<Month>/geoimagenet_<db>.<dd-Month-YYYY>.dmp`. Each dump is written to a `.tmp` file, checked (not empty, not less than half of the previous one) and renamed, so a failed run never leaves a bad `.dmp`. The newest 14 dumps of each database are kept, so a long off period never leaves a single dump. There is no backup container and no scheduler: the platform runs on demand, so dump at the end of each period (see [Daily operation](#daily-operation)):
+
+`/data/postgis_backups` is root-owned, so run it with sudo (`env.local` must be readable by root):
 
 ```bash
-./scripts/pg-dump.sh
+sudo ./scripts/pg-dump.sh
 ls -l /data/postgis_backups/$(date +%Y)/$(date +%B)/
 ```
 
-On a host that stays up, a host cron line does the same each night (`env.local` must be readable by that user):
+On a host that stays up, a line in root's crontab (`sudo crontab -e`) does the same each night:
 
 ```
 0 23 * * *  cd /home/<user>/geoimagenet/geoimagenet-compose && ./scripts/pg-dump.sh >> /var/log/geoimagenet-dump.log 2>&1
@@ -382,7 +384,7 @@ sudo rm -rf /data/db_gis_17/*        # empty data directory: the init script run
 **Query the database** by hand (the `psql_gis` shell helper):
 
 ```bash
-psql_gis() { set -a; . ./env.local; set +a; docker exec -it -e PGPASSWORD="$POSTGIS_PASSWORD" postgis psql -h localhost -U "$POSTGIS_USER" -d gis "$@"; }
+psql_gis() { set -a; . ./env.local; set +a; PGPASSWORD="$POSTGIS_PASSWORD" docker exec -it -e PGPASSWORD postgis psql -h localhost -U "$POSTGIS_USER" -d gis "$@"; }
 psql_gis -c '\dx'      # plpgsql and postgis, plus fuzzystrmatch once the migrations ran
 ```
 
@@ -401,14 +403,24 @@ df -h /data                         # space for a second copy of the databases
 docker exec postgis_backups /backups.sh
 sudo install -d /data/postgis_backups_pre-pg17                   # outside the 30-day cleanup of pg-dump.sh
 for db in gis magpie twitcher; do
+  ls -l "$(ls -t /data/postgis_backups/*/*/geoimagenet_$db.*.dmp | head -1)"   # check it is today's
+done
+for db in gis magpie twitcher; do
   sudo cp -p "$(ls -t /data/postgis_backups/*/*/geoimagenet_$db.*.dmp | head -1)" /data/postgis_backups_pre-pg17/
 done
 ls -l /data/postgis_backups_pre-pg17/
 # 3. swap the stack
 ./geoimagenet-compose.sh down
+# the named volume keeps its old device (/data/db_gis_data) even if the YAML changes: remove it
+# (a bind volume: the host files are untouched) so it is recreated on /data/db_gis_17
+docker volume rm geoimagenet-compose_postgis_data
 sudo install -d /data/db_gis_17
+# the VM first needs these commits (filtered branch + bundle) before it can check them out
 git checkout <the new commit>       # the compose commit with PostgreSQL 17
-./geoimagenet-compose.sh build geoserver geoserver-datastore      # GeoServer image with pgJDBC 42.2.29 (SCRAM); skip if the override does not build it
+# GeoServer image with pgJDBC 42.2.29 (SCRAM): in the real docker-compose.override.yml set the image of
+# geoserver and geoserver-datastore to geoimagenet-geoserver:2.15.0-cve-2024-36401-pgjdbc42229 (or re-copy the example)
+./geoimagenet-compose.sh build geoserver geoserver-datastore
+docker run --rm --entrypoint ls geoimagenet-geoserver:2.15.0-cve-2024-36401-pgjdbc42229 /usr/local/tomcat/webapps/geoserver/WEB-INF/lib | grep -x postgresql-42.2.29.jar
 ./geoimagenet-compose.sh pull postgis
 ./geoimagenet-compose.sh up -d --wait postgis                     # init script creates gis, magpie, twitcher
 # 4. restore and compare
@@ -417,16 +429,23 @@ git checkout <the new commit>       # the compose commit with PostgreSQL 17
 ./geoimagenet-compose.sh run --rm migrations current              # must show (head)
 # 5. start everything and check
 ./geoimagenet-compose.sh up -d --wait
-./scripts/pg-dump.sh                # first dump on 17
+sudo ./scripts/pg-dump.sh           # first dump on 17
 ls /data/db_gis_data >/dev/null && echo "old data directory intact"
 ```
 
-Checks: the web interface loads, you can log in as `MAGPIE_ADMIN_USER`, an annotation can be created and deleted, the imagery renders. `docker exec postgis psql -U $POSTGIS_USER -d gis -Atc 'select version()'` (with `PGPASSWORD`) shows 17.x.
+Checks: the web interface loads, you can log in as `MAGPIE_ADMIN_USER`, an annotation can be created and deleted, the imagery renders. Also an anonymous WFS request, which exercises GeoServer's JDBC login to PostgreSQL 17 (use `-k` with a self-signed certificate):
+
+```bash
+curl -sk "https://<host>/geoserver/wfs?service=WFS&version=1.1.0&request=GetFeature&typeName=GeoImageNet:annotation&maxFeatures=1&outputFormat=application/json" | head -c 300
+```
+
+It must return a FeatureCollection, not an exception. Do the same for a footprint layer (`PLEIADES_CONTOURS:...`, with a logged-in session cookie if anonymous access is not allowed). `docker exec postgis psql -U $POSTGIS_USER -d gis -Atc 'select version()'` (with `PGPASSWORD`) shows 17.x.
 
 **Rollback** (data written since step 5 is lost, so decide before users come back):
 
 ```bash
 ./geoimagenet-compose.sh down
+docker volume rm geoimagenet-compose_postgis_data   # same reason: back to the old device
 git checkout cut-0
 ./geoimagenet-compose.sh up -d --wait
 ```
