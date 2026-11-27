@@ -24,7 +24,9 @@ services:
   # No source exists for the custom geoimagenet/geoserver:2.14.0 image, and Docker Hub has
   # no kartoza/geoserver 2.14 tag. 2.15.0 (2019) is the closest kartoza release.
   geoserver:
-    image: kartoza/geoserver:2.15.0@sha256:6e04cd515da846d0791ccaad0c69cec9a450424fee90481ab367d9147e0a58dc
+    # kartoza/geoserver:2.15.0 (pinned) without gt-complex: workaround for CVE-2024-36401
+    build: ./docker/geoserver
+    image: geoimagenet-geoserver:2.15.0-cve-2024-36401
     environment:
       # The kartoza entrypoint rebuilds GEOSERVER_OPTS from INITIAL_MEMORY/MAXIMUM_MEMORY
       # and appends it to JAVA_OPTS, so the heap is set here, not with -Xmx.
@@ -44,7 +46,9 @@ services:
   # Then: ./geoimagenet-compose.sh run --rm geoserver_setup --setup-datastore
   # The name must not contain an underscore: Tomcat rejects such Host headers with 400.
   geoserver-datastore:
-    image: kartoza/geoserver:2.15.0@sha256:6e04cd515da846d0791ccaad0c69cec9a450424fee90481ab367d9147e0a58dc
+    # kartoza/geoserver:2.15.0 (pinned) without gt-complex: workaround for CVE-2024-36401
+    build: ./docker/geoserver
+    image: geoimagenet-geoserver:2.15.0-cve-2024-36401
     container_name: geoserver-datastore
     environment:
       - JAVA_OPTS=-Djava.awt.headless=true
