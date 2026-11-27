@@ -19,7 +19,7 @@ gs $U/services/wms/settings.xml | python3 -c '
 import sys, re
 x, mem, t = sys.stdin.read(), sys.argv[1], sys.argv[2]
 x = re.sub(r"<getMapMimeTypeCheckingEnabled>\w+<", "<getMapMimeTypeCheckingEnabled>true<", x)
-x = re.sub(r"\s*<getMapMimeTypes>.*?</getMapMimeTypes>|\s*<getMapMimeTypes/>", "", x, flags=re.S)
+x = re.sub(r"\s*<getMapMimeTypes[^>]*/>|\s*<getMapMimeTypes[^>]*>.*?</getMapMimeTypes>", "", x, flags=re.S)
 x = x.replace("<getMapMimeTypeCheckingEnabled>true</getMapMimeTypeCheckingEnabled>",
   "<getMapMimeTypeCheckingEnabled>true</getMapMimeTypeCheckingEnabled>\n  <getMapMimeTypes>\n    <string>image/png</string>\n    <string>image/jpeg</string>\n  </getMapMimeTypes>")
 x = re.sub(r"<dynamicStylingDisabled>\w+<", "<dynamicStylingDisabled>true<", x)
@@ -29,11 +29,11 @@ sys.stdout.write(x)' "$MEM_KB" "$TIME_S" \
 | gs -X PUT -H 'Content-Type: application/xml' --data-binary @- $U/services/wms/settings
 gs $U/services/wms/settings.xml | grep -E 'getMapMimeTypeCheckingEnabled|<string>image|dynamicStylingDisabled|maxRequestMemory|maxRenderingTime'
 
-# imagery layers (the cascaded PLEIADES_* ones) are not queryable
-for l in $(gs $U/layers.json | python3 -c 'import json,sys; print(*[x["name"] for x in json.load(sys.stdin)["layers"]["layer"] if x["name"].startswith("PLEIADES_")])'); do
+# imagery layers (every layer except the GeoImageNet: annotation ones) are not queryable
+for l in $(gs $U/layers.json | python3 -c 'import json,sys; print(*[x["name"] for x in json.load(sys.stdin)["layers"]["layer"] if not x["name"].startswith("GeoImageNet:")])'); do
   gs -X PUT -H 'Content-Type: application/json' -d '{"layer":{"queryable":false}}' "$U/layers/$l.json"
 done
-echo "imagery layers queryable=false: $(gs $U/layers.json | python3 -c 'import json,sys; print(sum(x["name"].startswith("PLEIADES_") for x in json.load(sys.stdin)["layers"]["layer"]))') layer(s)"
+echo "imagery layers queryable=false: $(gs $U/layers.json | python3 -c 'import json,sys; print(sum(not x["name"].startswith("GeoImageNet:") for x in json.load(sys.stdin)["layers"]["layer"]))') layer(s)"
 
 gs  -X PUT -H 'Content-Type: application/json' -d '{"wcs":{"enabled":false}}' $U/services/wcs/settings.json
 gsd -X PUT -H 'Content-Type: application/json' -d '{"wcs":{"enabled":false}}' $U/services/wcs/settings.json

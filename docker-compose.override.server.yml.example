@@ -34,7 +34,7 @@ services:
     environment:
       - SKIP_DEMO_DATA=true
       - GEOSERVER_ADMIN_USER=admin
-      - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_DATASTORE_PASSWORD}
+      - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_DATASTORE_PASSWORD:?set in env.local}
       - EXTRA_JAVA_OPTS=-Xms512M -Xmx2G -Dorg.geotools.referencing.forceXY=true -Duser.timezone=GMT
     volumes:
       # new directory: /data/geoserver_datastore (GeoServer 2.15) stays untouched as the rollback

@@ -177,7 +177,7 @@ services:
       - SKIP_DEMO_DATA=true
       # The image rewrites the admin user and password at EVERY start from these two variables.
       - GEOSERVER_ADMIN_USER=admin
-      - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_MIRROR_PASSWORD}
+      - GEOSERVER_ADMIN_PASSWORD=${GEOIMAGENET_API_GS_MIRROR_PASSWORD:?set in env.local}
       # Replaces the image's "-Xms256m -Xmx1g". Reduce the heap on hosts with little RAM.
       - EXTRA_JAVA_OPTS=-Xms1G -Xmx4G -Dorg.geotools.referencing.forceXY=true -Duser.timezone=GMT
     volumes:
@@ -185,7 +185,7 @@ services:
     depends_on:
       postgis:
         condition: service_healthy
-    restart: on-failure
+    restart: unless-stopped
     healthcheck:
       # the image's own check (a static resource of the web app), with a start_period
       test: curl --fail -s -o /dev/null "$$(cat $$CATALINA_HOME/conf/healthcheck_url.txt)" || exit 1

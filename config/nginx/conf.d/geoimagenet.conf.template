@@ -68,6 +68,7 @@ server {
     # administrator reach them inside the Docker network (http://geoserver:8080).
     location ^~ /geoserver/web { return 404; }
     location ^~ /geoserver/rest { return 404; }
+    location ^~ /geoserver/gwc/rest { return 404; }
     location ^~ /geoserver/j_spring_security_check { return 404; }
 
     location /geoserver {
